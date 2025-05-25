@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Bot Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="static/style.css">
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="bg-white rounded-lg shadow-sm p-6 mb-8">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-3xl font-bold text-gray-900">Telegram Bot Management System</h1>
+                    <p class="text-gray-600 mt-2">Product and Order Management Bot</p>
+                </div>
+                <div class="flex space-x-4">
+                    <button id="start-bot" class="bg-green-500 hover:bg-green-600 text-white px-6 py-2 rounded-lg transition-colors">
+                        Start Bot
+                    </button>
+                    <button id="stop-bot" class="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg transition-colors">
+                        Stop Bot
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Status Panel -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div class="bg-white rounded-lg shadow-sm p-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Bot Status</h3>
+                <div id="bot-status" class="flex items-center">
+                    <div class="w-3 h-3 bg-gray-400 rounded-full mr-2"></div>
+                    <span class="text-gray-600">Not Connected</span>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Database Status</h3>
+                <div id="db-status" class="flex items-center">
+                    <div class="w-3 h-3 bg-gray-400 rounded-full mr-2"></div>
+                    <span class="text-gray-600">Checking...</span>
+                </div>
+            </div>
+            <div class="bg-white rounded-lg shadow-sm p-6">
+                <h3 class="text-lg font-semibold text-gray-900 mb-2">Redis Status</h3>
+                <div id="redis-status" class="flex items-center">
+                    <div class="w-3 h-3 bg-gray-400 rounded-full mr-2"></div>
+                    <span class="text-gray-600">Checking...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Tabs -->
+        <div class="bg-white rounded-lg shadow-sm">
+            <div class="border-b border-gray-200">
+                <nav class="flex space-x-8 px-6" aria-label="Tabs">
+                    <button class="tab-button active border-b-2 border-blue-500 py-4 px-1 text-sm font-medium text-blue-600" data-tab="overview">
+                        Overview
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700" data-tab="products">
+                        Products
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700" data-tab="orders">
+                        Orders
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700" data-tab="users">
+                        Users
+                    </button>
+                    <button class="tab-button border-b-2 border-transparent py-4 px-1 text-sm font-medium text-gray-500 hover:text-gray-700" data-tab="logs">
+                        Logs
+                    </button>
+                </nav>
+            </div>
+
+            <!-- Tab Contents -->
+            <div class="p-6">
+                <!-- Overview Tab -->
+                <div id="overview-tab" class="tab-content">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">System Overview</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        <div class="bg-blue-50 rounded-lg p-4">
+                            <h3 class="text-lg font-semibold text-blue-900">Total Users</h3>
+                            <p id="total-users" class="text-3xl font-bold text-blue-600">-</p>
+                        </div>
+                        <div class="bg-green-50 rounded-lg p-4">
+                            <h3 class="text-lg font-semibold text-green-900">Active Orders</h3>
+                            <p id="active-orders" class="text-3xl font-bold text-green-600">-</p>
+                        </div>
+                        <div class="bg-yellow-50 rounded-lg p-4">
+                            <h3 class="text-lg font-semibold text-yellow-900">Products</h3>
+                            <p id="total-products" class="text-3xl font-bold text-yellow-600">-</p>
+                        </div>
+                        <div class="bg-purple-50 rounded-lg p-4">
+                            <h3 class="text-lg font-semibold text-purple-900">Locations</h3>
+                            <p id="total-locations" class="text-3xl font-bold text-purple-600">-</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-8">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+                        <div id="recent-activity" class="space-y-3">
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <p class="text-gray-600">No recent activity</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Products Tab -->
+                <div id="products-tab" class="tab-content hidden">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl font-bold text-gray-900">Products Management</h2>
+                        <button class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors">
+                            Add Product
+                        </button>
+                    </div>
+                    <div id="products-list" class="space-y-4">
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <p class="text-gray-600">Loading products...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Orders Tab -->
+                <div id="orders-tab" class="tab-content hidden">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">Orders Management</h2>
+                    <div id="orders-list" class="space-y-4">
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <p class="text-gray-600">Loading orders...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Users Tab -->
+                <div id="users-tab" class="tab-content hidden">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">Users Management</h2>
+                    <div id="users-list" class="space-y-4">
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <p class="text-gray-600">Loading users...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div id="logs-tab" class="tab-content hidden">
+                    <h2 class="text-2xl font-bold text-gray-900 mb-6">System Logs</h2>
+                    <div class="bg-black rounded-lg p-4 h-96 overflow-y-auto">
+                        <pre id="logs-content" class="text-green-400 text-sm font-mono">Bot management system ready...</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="static/script.js"></script>
+</body>
+</html>
+
+
+
+
+
+

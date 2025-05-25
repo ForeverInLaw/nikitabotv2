@@ -1,0 +1,63 @@
+# Multi-stage build for optimized image size
+# Stage 1: Builder for dependencies
+FROM python:3.11-slim as builder
+
+# Install system dependencies required for building Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements file
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Stage 2: Final runtime image
+FROM python:3.11-slim
+
+# Install only runtime system libraries
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy installed Python packages from builder stage
+COPY --from=builder /root/.local /root/.local
+
+# Add local Python packages to PATH
+ENV PATH=/root/.local/bin:$PATH
+
+# Create necessary directories
+RUN mkdir -p /app/logs
+
+# Copy application code
+COPY . /app/
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash app \
+    && chown -R app:app /app
+
+# Copy and set up entrypoint script
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Switch to non-root user
+USER app
+
+# Expose port for web dashboard
+EXPOSE 8080
+
+# Health check for the application
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD python -c "import requests; requests.get('http://localhost:8080/health', timeout=5)" || exit 1
+
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["python", "bot.py"]
