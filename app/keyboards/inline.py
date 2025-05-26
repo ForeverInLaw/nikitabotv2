@@ -476,7 +476,17 @@ def create_admin_stock_locations_keyboard(product_id: int, locations_data: List[
         button_text = f"{loc_data.get('name', get_text('unknown_location_name', language))} ({loc_data.get('quantity', 0)} {get_text('units_short', language)})"
         builder.row(InlineKeyboardButton(text=button_text, callback_data=f"admin_stock_update_selected_loc:{product_id}:{loc_data['id']}")) 
                                         
-    builder.row(create_back_button("back_to_product_options", language, f"admin_prod_options:{product_id}")) 
+    builder.row(create_back_button("back_to_product_options", language, f"admin_prod_options:{product_id}"))
+    return builder.as_markup()
+
+def create_admin_product_view_actions_keyboard(product_id: int, language: str) -> InlineKeyboardMarkup:
+    """Creates keyboard with actions for a viewed product (Edit, Delete, Back)."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text=get_text("admin_button_edit_product", language), callback_data=f"admin_prod_options:{product_id}"),
+        InlineKeyboardButton(text=get_text("admin_button_delete_product", language), callback_data=f"admin_prod_delete_confirm:{product_id}")
+    )
+    builder.row(create_back_button("admin_button_back_to_product_list", language, "admin_prod_list:0"))
     return builder.as_markup()
 
 

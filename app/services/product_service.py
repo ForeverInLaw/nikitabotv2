@@ -7,8 +7,10 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 
-from sqlalchemy import select # Added import
+from sqlalchemy import select, func # Added import
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError # Added import
+from sqlalchemy.orm import selectinload
+
 
 from app.db.database import get_session
 from app.db.repositories.product_repo import ProductRepository
@@ -371,3 +373,434 @@ class ProductService:
                 await session.rollback()
             logger.error(f"Unexpected error while updating manufacturer {manufacturer_id} to name '{name}': {e}", exc_info=True)
             return False, "admin_manufacturer_update_failed_unexpected", None
+
+    async def create_product_with_details(
+        self,
+        admin_id: int, # For logging purposes, not directly used in creation logic here
+        product_data: Dict[str, Any],
+        localizations_data: List[Dict[str, str]],
+        lang: str = "en"  # For error messages, though not heavily used here
+    ) -> Tuple[Optional[Product], str, Optional[int]]:
+        """
+        Creates a new product with its details and localizations.
+        Returns a tuple: (created_product_object, message_key, product_id).
+        """
+        async with get_session() as session:
+            try:
+                product_repo = ProductRepository(session)
+
+                # Validate Manufacturer ID
+                manufacturer_id = product_data.get("manufacturer_id")
+                if manufacturer_id:
+                    manufacturer = await product_repo.get_manufacturer_by_id(manufacturer_id)
+                    if not manufacturer:
+                        logger.warning(f"Admin {admin_id} attempting to create product with non-existent manufacturer ID {manufacturer_id}.")
+                        return None, "admin_error_manufacturer_not_found", None
+                else: # Should be caught by FSM validation, but good to have a safeguard
+                    logger.error(f"Admin {admin_id} - product creation attempt without manufacturer_id.")
+                    return None, "admin_error_manufacturer_not_found", None
+
+
+                # Validate Category ID (if provided)
+                category_id = product_data.get("category_id")
+                if category_id: # Category can be optional
+                    category = await product_repo.get_category_by_id(category_id)
+                    if not category:
+                        logger.warning(f"Admin {admin_id} attempting to create product with non-existent category ID {category_id}.")
+                        return None, "admin_error_category_not_found", None
+                
+                # Create the product
+                # ProductRepository.create_product expects specific args, not a dict
+                new_product = await product_repo.create_product(
+                    manufacturer_id=product_data["manufacturer_id"],
+                    category_id=product_data.get("category_id"), # Optional
+                    cost=product_data["cost"],
+                    sku=product_data.get("sku"), # Optional
+                    variation=product_data.get("variation"), # Optional
+                    image_url=product_data.get("image_url") # Optional
+                )
+
+                if not new_product or not new_product.id: # Should not happen if create_product is robust
+                    await session.rollback()
+                    logger.error(f"Admin {admin_id} - product creation failed unexpectedly after repo.create_product call for SKU {product_data.get('sku')}.")
+                    return None, "admin_product_create_failed_db_error", None
+                
+                logger.info(f"Admin {admin_id} created product draft ID {new_product.id} with SKU {new_product.sku}.")
+
+                # Add localizations
+                if not localizations_data: # Should be caught by FSM, at least one localization needed
+                    await session.rollback()
+                    logger.warning(f"Admin {admin_id} - product creation attempt for product ID {new_product.id} without localizations.")
+                    return None, "admin_product_create_failed_no_localization", new_product.id
+
+
+                for loc_data in localizations_data:
+                    await product_repo.add_or_update_product_localization(
+                        product_id=new_product.id,
+                        language_code=loc_data["language_code"],
+                        name=loc_data["name"],
+                        description=loc_data.get("description") # Optional
+                    )
+                logger.info(f"Admin {admin_id} added {len(localizations_data)} localizations for product ID {new_product.id}.")
+
+                await session.commit()
+                logger.info(f"Admin {admin_id} successfully created product ID {new_product.id} (SKU: {new_product.sku}) with all details.")
+                # Fetch the product again to ensure all relationships (like localizations) are loaded for the return object
+                # This might be redundant if create_product and add_or_update_product_localization correctly update the new_product object in-session
+                # However, to be safe and ensure the returned object is complete:
+                created_product_with_rels = await product_repo.get_product_by_id_with_details(new_product.id)
+
+                return created_product_with_rels, "admin_product_created_successfully", new_product.id
+
+            except IntegrityError as e:
+                await session.rollback()
+                # Basic check for unique constraint violation (could be SKU or other unique fields)
+                # More specific parsing of e.orig might be needed if there are multiple unique constraints
+                # For example, if e.orig.diag.constraint_name gives the constraint name.
+                # Assuming product_sku_key is the unique constraint name for SKU.
+                # This is highly database-dependent (PostgreSQL example).
+                # if "product_sku_key" in str(e.orig).lower() or "unique constraint" in str(e.orig).lower() and "sku" in str(e.orig).lower():
+                if "product_sku_key" in str(e.orig).lower() or (hasattr(e.orig, 'diag') and e.orig.diag.constraint_name == 'product_sku_key'):
+                    logger.warning(f"Admin {admin_id} - product creation failed due to duplicate SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                    return None, "admin_product_create_failed_sku_duplicate", None
+                
+                logger.error(f"Admin {admin_id} - product creation failed due to IntegrityError for SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                return None, "admin_product_create_failed_db_error", None # Generic integrity error
+
+            except SQLAlchemyError as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} - product creation failed due to SQLAlchemyError for SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                return None, "admin_product_create_failed_db_error", None
+
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} - unexpected error during product creation for SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                return None, "admin_product_create_failed_unexpected", None
+
+    async def get_products_for_admin_list(self, page: int, items_per_page: int, lang: str) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Fetches a paginated list of products for the admin panel.
+        Formats product names based on the provided language or fallbacks.
+        """
+        async with get_session() as session:
+            product_repo = ProductRepository(session)
+            
+            # Fetch paginated products with details (localizations, sku, cost)
+            # The repository method list_products should ideally allow eager loading of localizations.
+            # Assuming list_products is updated or already does this.
+            products_on_page = await product_repo.list_products(
+                limit=items_per_page, 
+                offset=page * items_per_page,
+                with_details=True # Ensure this loads localizations
+            )
+            
+            total_count_stmt = select(func.count(Product.id))
+            total_count_result = await session.execute(total_count_stmt)
+            total_count = total_count_result.scalar_one()
+
+            formatted_products = []
+            for product in products_on_page:
+                display_name = None
+                # Try to get localization for the given lang
+                for loc in product.localizations:
+                    if loc.language_code == lang:
+                        display_name = loc.name
+                        break
+                # If not found, try for 'en'
+                if not display_name:
+                    for loc in product.localizations:
+                        if loc.language_code == "en":
+                            display_name = loc.name
+                            break
+                # If still not found, use placeholder
+                if not display_name:
+                    display_name = f"Product ID: {product.id}" # Fallback
+                
+                formatted_products.append({
+                    'id': product.id,
+                    'name': display_name, # This name is now ready for display in `create_paginated_keyboard`
+                    'sku': product.sku if product.sku else get_text("not_set", lang, default="-"),
+                    'cost': format_price(product.cost, lang) # Format price here
+                })
+            
+            return formatted_products, total_count
+
+    async def get_product_details_for_admin(self, product_id: int, lang: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetches detailed product information for the admin panel.
+        Includes manufacturer, category, all localizations, and stock levels.
+        """
+        async with get_session() as session:
+            product_repo = ProductRepository(session)
+            
+            # Fetch product with details (manufacturer, category, localizations, stocks with locations)
+            # The repository method get_product_by_id should support `with_details=True`
+            # to eager load these relationships.
+            product = await product_repo.get_product_by_id(product_id, with_details=True)
+
+            if not product:
+                return None
+
+            # Basic fields
+            details = {
+                "id": product.id,
+                "sku": product.sku if product.sku else get_text("not_set", lang, default="-"),
+                "variation": product.variation if product.variation else get_text("not_set", lang, default="-"),
+                "cost": format_price(product.cost, lang), # Format price
+                "image_url": product.image_url, # Will be None if not set, handled by display logic
+                "manufacturer_name": product.manufacturer.name if product.manufacturer else get_text("not_assigned", lang, default="N/A"),
+                "category_name": product.category.name if product.category else get_text("not_assigned", lang, default="N/A"),
+            }
+
+            # Localizations
+            localizations_list = []
+            for loc in product.localizations:
+                localizations_list.append({
+                    'lang_code': loc.language_code,
+                    'name': loc.name,
+                    'description': loc.description if loc.description else get_text("not_set", lang, default="-")
+                })
+            details["localizations"] = localizations_list
+
+            # Stock Summary
+            stock_summary_list = []
+            if product.stocks: # product.stocks should be loaded if with_details=True is effective
+                for stock_item in product.stocks:
+                    # Ensure location is loaded for each stock_item.
+                    # If not automatically loaded by with_details=True on product.stocks,
+                    # this might require an explicit load option in the repo or a separate query.
+                    # For now, assume stock_item.location is available.
+                    location_name = stock_item.location.name if stock_item.location else get_text("unknown_location_name", lang)
+                    stock_summary_list.append({
+                        'location_name': location_name,
+                        'quantity': stock_item.quantity
+                    })
+            details["stock_summary"] = stock_summary_list
+            
+            return details
+
+    async def update_product_field(
+        self, admin_id: int, product_id: int, field_name: str, field_value: Any, lang: str
+    ) -> Tuple[bool, str, Optional[Any]]:
+        """
+        Updates a basic field of a product.
+        Returns: (success_status, message_key, new_value_or_None_on_error)
+        """
+        async with get_session() as session:
+            try:
+                product_repo = ProductRepository(session)
+                
+                # Validate product existence
+                product = await product_repo.get_product_by_id(product_id)
+                if not product:
+                    return False, "admin_product_not_found", None
+
+                # Prepare update data
+                update_data = {field_name: field_value}
+
+                # Specific validation for certain fields
+                if field_name == "cost":
+                    if not isinstance(field_value, Decimal) or field_value <= 0:
+                        return False, "admin_prod_invalid_cost_format", None
+                elif field_name == "sku":
+                    # SKU can be None (optional), but if provided, it's a string.
+                    # Unique constraint handled by IntegrityError.
+                    pass 
+                
+                updated_product = await product_repo.update_product(product_id, **update_data)
+                if not updated_product: # Should not happen if product was found and update is simple
+                    await session.rollback()
+                    return False, "admin_prod_update_failed_generic", None
+
+                await session.commit()
+                logger.info(f"Admin {admin_id} updated product {product_id} field '{field_name}' to '{field_value}'.")
+                
+                # Return the actual value set on the model, if different (e.g. Decimal precision)
+                # For simplicity, returning the input field_value if successful.
+                return True, "admin_prod_updated_field_successfully", field_value
+
+            except IntegrityError as e:
+                await session.rollback()
+                if "product_sku_key" in str(e.orig).lower() or \
+                   (hasattr(e.orig, 'diag') and hasattr(e.orig.diag, 'constraint_name') and e.orig.diag.constraint_name == 'product_sku_key'):
+                    logger.warning(f"Admin {admin_id} failed to update SKU for product {product_id} due to duplicate: {e}")
+                    return False, "admin_product_update_failed_sku_duplicate", field_value # Return attempted value
+                logger.error(f"Admin {admin_id} failed to update product {product_id} field '{field_name}' due to IntegrityError: {e}", exc_info=True)
+                return False, "admin_prod_update_failed_db_error", None
+            
+            except ValueError as e: # Catch specific ValueErrors like for cost
+                await session.rollback()
+                logger.warning(f"Admin {admin_id} failed to update product {product_id} field '{field_name}' due to ValueError: {e}")
+                return False, "admin_prod_invalid_input_for_field", None
+
+            except SQLAlchemyError as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} failed to update product {product_id} field '{field_name}' due to SQLAlchemyError: {e}", exc_info=True)
+                return False, "admin_prod_update_failed_db_error", None
+            
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} - unexpected error updating product {product_id} field '{field_name}': {e}", exc_info=True)
+                return False, "admin_prod_update_failed_unexpected", None
+
+    async def update_product_association(
+        self, admin_id: int, product_id: int, association_type: str, associated_id: Optional[int], lang: str
+    ) -> Tuple[bool, str, Optional[int]]:
+        """
+        Updates a product's association (manufacturer or category).
+        `association_type` should be 'manufacturer' or 'category'.
+        `associated_id` can be None if setting category to None.
+        Returns: (success_status, message_key, new_associated_id_or_None_on_error)
+        """
+        async with get_session() as session:
+            try:
+                product_repo = ProductRepository(session)
+
+                # Validate product existence
+                product = await product_repo.get_product_by_id(product_id)
+                if not product:
+                    return False, "admin_product_not_found", None
+
+                field_name_to_update = f"{association_type}_id" # e.g., manufacturer_id or category_id
+
+                # Validate associated entity if ID is provided
+                if associated_id is not None:
+                    if association_type == "manufacturer":
+                        entity = await product_repo.get_manufacturer_by_id(associated_id)
+                        if not entity:
+                            return False, "admin_error_manufacturer_not_found", None
+                    elif association_type == "category":
+                        entity = await product_repo.get_category_by_id(associated_id)
+                        if not entity:
+                            return False, "admin_error_category_not_found", None
+                    else: # Should not happen
+                        return False, "admin_prod_update_failed_invalid_association", None
+                elif association_type == "manufacturer" and associated_id is None:
+                    # Manufacturer cannot be None for a product
+                    return False, "admin_prod_error_manufacturer_cannot_be_none", None
+                
+                # Category can be None, so associated_id=None is valid for category_id
+
+                updated_product = await product_repo.update_product(product_id, **{field_name_to_update: associated_id})
+                if not updated_product: # Should not happen if product and associated entity exist
+                    await session.rollback()
+                    return False, "admin_prod_update_failed_generic", None
+                
+                await session.commit()
+                logger.info(f"Admin {admin_id} updated product {product_id} association '{association_type}' to ID '{associated_id}'.")
+                return True, "admin_prod_updated_association_successfully", associated_id
+
+            except SQLAlchemyError as e: # Covers IntegrityError for foreign key violations if associated_id is invalid
+                await session.rollback()
+                logger.error(f"Admin {admin_id} failed to update product {product_id} association '{association_type}' to ID '{associated_id}' due to SQLAlchemyError: {e}", exc_info=True)
+                return False, "admin_prod_update_failed_db_error_association", None
+            
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} - unexpected error updating product {product_id} association '{association_type}': {e}", exc_info=True)
+                return False, "admin_prod_update_failed_unexpected", None
+
+    async def add_or_update_product_localization_service(
+        self, admin_id: int, product_id: int, loc_lang_code: str, name: str, description: Optional[str], lang: str
+    ) -> Tuple[bool, str]:
+        """
+        Adds or updates a product localization.
+        Returns: (success_status, message_key)
+        """
+        async with get_session() as session:
+            try:
+                product_repo = ProductRepository(session)
+                
+                # Validate product existence
+                product = await product_repo.get_product_by_id(product_id)
+                if not product:
+                    return False, "admin_product_not_found" # No product_name for this key
+
+                await product_repo.add_or_update_product_localization(
+                    product_id=product_id,
+                    language_code=loc_lang_code,
+                    name=name,
+                    description=description
+                )
+                await session.commit()
+                logger.info(f"Admin {admin_id} added/updated localization for product {product_id} (Lang: {loc_lang_code}, Name: {name}).")
+                # Determine if it was an add or update for message key (optional, repo method doesn't directly tell us)
+                # For simplicity, using a generic success message for now.
+                return True, "admin_prod_localization_saved_successfully"
+
+            except SQLAlchemyError as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} failed to save localization for product {product_id} (Lang: {loc_lang_code}) due to SQLAlchemyError: {e}", exc_info=True)
+                return False, "admin_prod_localization_save_failed_db"
+            
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Admin {admin_id} - unexpected error saving localization for product {product_id} (Lang: {loc_lang_code}): {e}", exc_info=True)
+                return False, "admin_prod_localization_save_failed_unexpected"
+
+    async def delete_product_by_admin(self, admin_id: int, product_id: int, lang: str) -> Tuple[bool, str, Optional[str]]:
+        """
+        Deletes a product by its ID.
+        Returns a tuple: (success_status, message_key, optional_product_name).
+        product_name is returned for use in messages.
+        """
+        product_display_name = f"ID {product_id}" # Default display name
+
+        # Attempt to get product details for a more user-friendly name in messages
+        try:
+            product_details = await self.get_product_details_for_admin(product_id, lang)
+            if not product_details:
+                logger.warning(f"Admin {admin_id} attempting to delete non-existent product ID {product_id}.")
+                return False, "admin_product_not_found", None
+            
+            # Try to get a good display name
+            if product_details.get("localizations"):
+                name_found = False
+                for loc in product_details["localizations"]:
+                    if loc['lang_code'] == lang:
+                        product_display_name = loc['name']
+                        name_found = True
+                        break
+                if not name_found: # Fallback to English or first localization
+                    for loc in product_details["localizations"]:
+                        if loc['lang_code'] == "en":
+                            product_display_name = loc['name']
+                            name_found = True
+                            break
+                    if not name_found and product_details["localizations"]:
+                         product_display_name = product_details["localizations"][0]['name'] # First available
+            elif product_details.get("sku"):
+                product_display_name = product_details["sku"]
+            
+        except Exception as e_fetch: # Catch errors during detail fetching but still allow delete attempt
+            logger.error(f"Error fetching product details for product {product_id} before deletion by admin {admin_id}: {e_fetch}", exc_info=True)
+            # product_display_name remains "ID {product_id}"
+
+        async with get_session() as session:
+            try:
+                product_repo = ProductRepository(session)
+                
+                # The repository's delete_product method is expected to return False
+                # if an IntegrityError (due to RESTRICT constraint) occurs.
+                success = await product_repo.delete_product(product_id)
+                
+                if success:
+                    await session.commit()
+                    logger.info(f"Admin {admin_id} successfully deleted product ID {product_id} (Display Name: '{product_display_name}').")
+                    return True, "admin_product_deleted_successfully", product_display_name
+                else:
+                    # This implies an IntegrityError was caught in the repository,
+                    # likely because the product is referenced by an OrderItem.
+                    await session.rollback() # Should be handled in repo, but ensure here.
+                    logger.warning(f"Admin {admin_id} failed to delete product ID {product_id} (Display Name: '{product_display_name}') due to it being in use (e.g., in an order).")
+                    return False, "admin_product_delete_failed_in_use", product_display_name
+
+            except SQLAlchemyError as e: # Catch other DB errors not handled as False by repo
+                await session.rollback()
+                logger.error(f"Admin {admin_id} failed to delete product ID {product_id} (Display Name: '{product_display_name}') due to SQLAlchemyError: {e}", exc_info=True)
+                return False, "admin_product_delete_failed_generic", product_display_name
+            
+            except Exception as e: # Catch any other unexpected errors
+                await session.rollback()
+                logger.error(f"Admin {admin_id} - unexpected error deleting product ID {product_id} (Display Name: '{product_display_name}'): {e}", exc_info=True)
+                return False, "admin_product_delete_failed_unexpected", product_display_name
