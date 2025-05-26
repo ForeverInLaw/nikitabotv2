@@ -8,7 +8,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 
 from sqlalchemy import select # Added import
-from sqlalchemy.exc import SQLAlchemyError # Added import
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError # Added import
 
 from app.db.database import get_session
 from app.db.repositories.product_repo import ProductRepository
@@ -312,5 +312,62 @@ class ProductService:
             return False, "admin_manufacturer_delete_failed", manufacturer_name
         except Exception as e: # Catch any other unexpected errors
             logger.error(f"Unexpected error while deleting manufacturer {manufacturer_id} ({manufacturer_name}): {e}", exc_info=True)
-            await session.rollback() # Rollback on error
+            # Ensure session is available for rollback; it might not be if get_session() failed.
+            if 'session' in locals() and session.is_active:
+                 await session.rollback() # Rollback on error
             return False, "admin_manufacturer_delete_failed", manufacturer_name
+
+    async def update_manufacturer_details(
+        self, manufacturer_id: int, name: str, lang: str = "en"
+    ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
+        """
+        Updates a manufacturer's details.
+        Returns a tuple: (success_status, message_key, optional_updated_manufacturer_details_dict).
+        """
+        # Get current manufacturer details for logging or pre-check if needed, though not strictly necessary for the update itself
+        # current_manufacturer = await self.get_entity_by_id("manufacturer", manufacturer_id, lang)
+        # if not current_manufacturer:
+        # return False, "admin_manufacturer_not_found", None
+
+        try:
+            async with get_session() as session:
+                product_repo = ProductRepository(session)
+                
+                # The repository method should handle the actual update logic
+                # It should return the updated manufacturer object or None if not found/not updated
+                updated_manufacturer = await product_repo.update_manufacturer(manufacturer_id, name)
+                
+                if updated_manufacturer:
+                    await session.commit()
+                    logger.info(f"Manufacturer {manufacturer_id} updated successfully to name '{name}'.")
+                    return True, "admin_manufacturer_updated_successfully", {"id": updated_manufacturer.id, "name": updated_manufacturer.name}
+                else:
+                    # This case might occur if the manufacturer was deleted just before the update.
+                    # Or if update_manufacturer returns None for "no change" (though a specific check for that might be better)
+                    await session.rollback() # Rollback, as no change was made or target not found by repo method
+                    logger.warning(f"Attempted to update manufacturer {manufacturer_id} but it was not found or not updated by repository.")
+                    return False, "admin_manufacturer_not_found", None
+
+        except IntegrityError as e:
+            # Specific error for duplicate names (assuming name has a unique constraint)
+            # The original exception 'e' might contain details about which constraint was violated.
+            # logger.error(f"Integrity error while updating manufacturer {manufacturer_id} to name '{name}': {e}", exc_info=True)
+            # Check if session is active before rollback
+            if 'session' in locals() and session.is_active:
+                await session.rollback()
+            logger.error(f"Integrity error (likely duplicate name) while updating manufacturer {manufacturer_id} to name '{name}': {e}", exc_info=True)
+            return False, "admin_manufacturer_update_failed_duplicate", None
+            
+        except SQLAlchemyError as e:
+            # Generic database error
+            if 'session' in locals() and session.is_active:
+                await session.rollback()
+            logger.error(f"Database error while updating manufacturer {manufacturer_id} to name '{name}': {e}", exc_info=True)
+            return False, "admin_manufacturer_update_failed_db_error", None
+            
+        except Exception as e:
+            # Catch any other unexpected errors
+            if 'session' in locals() and session.is_active:
+                await session.rollback()
+            logger.error(f"Unexpected error while updating manufacturer {manufacturer_id} to name '{name}': {e}", exc_info=True)
+            return False, "admin_manufacturer_update_failed_unexpected", None

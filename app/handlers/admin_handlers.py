@@ -84,10 +84,11 @@ class AdminProductStates(StatesGroup):
     CATEGORY_SELECT_FOR_DELETE = State()
 
     MANUFACTURER_AWAIT_NAME = State()
-    MANUFACTURER_AWAIT_EDIT_NAME = State() 
+    MANUFACTURER_AWAIT_EDIT_NAME = State()
     MANUFACTURER_SELECT_FOR_EDIT = State()
     MANUFACTURER_SELECT_FOR_DELETE = State()
     MANUFACTURER_CONFIRM_DELETE = State() # New state
+    # MANUFACTURER_AWAIT_NEW_NAME = State() # Covered by MANUFACTURER_AWAIT_EDIT_NAME
 
     LOCATION_AWAIT_NAME = State()
     LOCATION_AWAIT_ADDRESS = State()
@@ -1360,6 +1361,204 @@ async def cq_admin_execute_delete_manufacturer(callback: types.CallbackQuery, st
     await _send_paginated_manufacturers_for_delete(callback, state, user_data, page=0)
 
 
+# --- Manufacturer Edit Handlers ---
+
+async def _send_paginated_manufacturers_for_edit(
+    event: Union[types.Message, types.CallbackQuery],
+    state: FSMContext,
+    user_data: Dict[str, Any],
+    page: int = 0
+):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(event.from_user.id, user_service):
+        msg = get_text("admin_access_denied", lang)
+        if isinstance(event, types.CallbackQuery): await event.answer(msg, show_alert=True)
+        else: await event.answer(msg)
+        return
+
+    manufacturers_on_page_data, total_manufacturers = await product_service.get_all_entities_paginated(
+        entity_type="manufacturer",
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        language=lang
+    )
+
+    title = get_text("admin_select_manufacturer_to_edit_title", lang)
+
+    if not manufacturers_on_page_data and page == 0:
+        empty_text = title + "\n\n" + get_text("admin_no_manufacturers_found", lang) # Using generic "no manufacturers found"
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_manufacturer_menu", lang, "admin_manufacturers_menu")).as_markup()
+        
+        target_message = event.message if isinstance(event, types.CallbackQuery) else event
+        if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+             await target_message.edit_text(empty_text, reply_markup=kb)
+        else:
+             await target_message.answer(empty_text, reply_markup=kb)
+        if isinstance(event, types.CallbackQuery): await event.answer()
+        return
+
+    await state.set_state(AdminProductStates.MANUFACTURER_SELECT_FOR_EDIT)
+    await state.update_data(current_manufacturer_edit_page=page)
+
+    keyboard = create_paginated_keyboard(
+        items=manufacturers_on_page_data,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_select_manufacturer_for_edit_page",
+        item_callback_prefix="admin_edit_manufacturer_prompt", # Action for selecting a manufacturer to edit
+        language=lang,
+        back_callback_key="back_to_manufacturer_menu",
+        back_callback_data="admin_manufacturers_menu",
+        total_items_override=total_manufacturers,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    
+    target_message = event.message if isinstance(event, types.CallbackQuery) else event
+    if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+        await target_message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML")
+        
+    if isinstance(event, types.CallbackQuery): await event.answer()
+
+@router.callback_query(F.data == "admin_edit_manufacturer_start", StateFilter("*"))
+async def cq_admin_edit_manufacturer_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    await _send_paginated_manufacturers_for_edit(callback, state, user_data, page=0)
+
+@router.callback_query(F.data.startswith("admin_select_manufacturer_for_edit_page:"), StateFilter(AdminProductStates.MANUFACTURER_SELECT_FOR_EDIT))
+async def cq_admin_select_manufacturer_for_edit_paginate(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        page = 0 # Default to page 0 if malformed
+    await _send_paginated_manufacturers_for_edit(callback, state, user_data, page=page)
+
+@router.callback_query(F.data.startswith("admin_edit_manufacturer_prompt:"), StateFilter(AdminProductStates.MANUFACTURER_SELECT_FOR_EDIT))
+async def cq_admin_edit_manufacturer_prompt_name(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        manufacturer_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang), show_alert=True)
+        return # Or redirect to list
+
+    manufacturer_entity = await product_service.get_entity_by_id("manufacturer", manufacturer_id, lang)
+    if not manufacturer_entity:
+        await callback.answer(get_text("admin_manufacturer_not_found", lang), show_alert=True)
+        current_page = (await state.get_data()).get("current_manufacturer_edit_page", 0)
+        return await _send_paginated_manufacturers_for_edit(callback, state, user_data, page=current_page)
+
+    current_name = manufacturer_entity.get("name", str(manufacturer_id))
+    
+    await state.set_state(AdminProductStates.MANUFACTURER_AWAIT_EDIT_NAME)
+    await state.update_data(editing_manufacturer_id=manufacturer_id, editing_manufacturer_current_name=current_name)
+
+    prompt_text = get_text("admin_enter_new_manufacturer_name_prompt", lang, current_name=hcode(current_name))
+    cancel_info = get_text("cancel_prompt", lang)
+    
+    # Provide a back button to go back to the selection list
+    # Back button to go back to the selection list, preserving the page
+    current_page = (await state.get_data()).get("current_manufacturer_edit_page", 0)
+    back_button_cb = f"admin_select_manufacturer_for_edit_page:{current_page}"
+    if callback.data == "admin_edit_manufacturer_start": # If came from menu directly, no page, go to page 0
+        back_button_cb = "admin_edit_manufacturer_start"
+
+
+    builder = InlineKeyboardBuilder()
+    # builder.row(create_back_button("back_to_manufacturer_selection", lang, back_button_cb)) # TODO: This back button might be tricky with message edits. For now, rely on /cancel.
+    
+    await callback.message.edit_text(f"{prompt_text}\n\n{hitalic(cancel_info)}", reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@router.message(StateFilter(AdminProductStates.MANUFACTURER_AWAIT_EDIT_NAME), F.text)
+async def fsm_admin_manufacturer_new_name_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        # Before calling universal cancel, determine the correct "back" navigation
+        # Send them back to the manufacturer edit selection list
+        await message.answer(get_text("admin_action_cancelled", lang)) # Acknowledge cancel first
+        state_data = await state.get_data()
+        current_page = state_data.get("current_manufacturer_edit_page", 0)
+        # We need a CallbackQuery-like object or to call the list function directly with a message
+        # For simplicity, create a mock message event and call the list function.
+        # This is a bit of a workaround because universal_cancel might not be ideal here.
+        await state.clear() # Clear state first
+         # Create a temporary message to be edited by the paginated list function
+        temp_msg_for_list = await message.answer(get_text("loading_text", lang))
+        mock_event_for_list = temp_msg_for_list # It can take a message directly
+        return await _send_paginated_manufacturers_for_edit(mock_event_for_list, state, user_data, page=current_page)
+
+
+    state_data = await state.get_data()
+    manufacturer_id = state_data.get("editing_manufacturer_id")
+    original_name = state_data.get("editing_manufacturer_current_name")
+
+    if not manufacturer_id or original_name is None:
+        await message.answer(get_text("admin_action_failed_no_context", lang))
+        await state.clear()
+        # Send back to main manufacturers menu
+        return await cq_admin_manufacturers_menu_entry_point(message, state, user_data) # Assuming such a function exists or create one
+
+    new_name = sanitize_input(message.text)
+
+    if not new_name:
+        await message.answer(get_text("admin_manufacturer_name_empty_error", lang))
+        prompt_text = get_text("admin_enter_new_manufacturer_name_prompt", lang, current_name=hcode(original_name))
+        cancel_info = get_text("cancel_prompt", lang)
+        await message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML") # Re-prompt
+        return
+
+    if new_name == original_name:
+        await message.answer(get_text("admin_manufacturer_name_not_changed_error", lang, name=hcode(original_name)))
+        # Optionally, re-prompt or offer cancel. For now, just inform.
+        # To re-prompt:
+        # prompt_text = get_text("admin_enter_new_manufacturer_name_prompt", lang, current_name=hcode(original_name))
+        # cancel_info = get_text("cancel_prompt", lang)
+        # await message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML")
+        # return
+        # For now, we will proceed to send them back to the list after this message.
+        # Fall through to sending back to list.
+
+    success, msg_key, updated_details = await product_service.update_manufacturer_details(manufacturer_id, new_name, lang)
+
+    if success and updated_details:
+        await message.answer(get_text(msg_key, lang, name=hcode(updated_details['name'])))
+    else:
+        # Use original_name for context in error messages if new_name failed (e.g. duplicate)
+        await message.answer(get_text(msg_key, lang, name=hcode(new_name), original_name=hcode(original_name)))
+
+    await state.clear()
+    current_page = state_data.get("current_manufacturer_edit_page", 0)
+    # Send back to the list of manufacturers for editing.
+    # Create a temporary message that _send_paginated_manufacturers_for_edit can edit or reply to.
+    temp_msg_for_list_after_edit = await message.answer(get_text("loading_text", lang))
+    await _send_paginated_manufacturers_for_edit(temp_msg_for_list_after_edit, state, user_data, page=current_page)
+
+
 # --- Handler Registration (Illustrative - Actual registration in main bot file) ---
 # router.callback_query(F.data == "admin_delete_manufacturer_start", StateFilter("*"))(cq_admin_select_manufacturer_for_delete)
 # router.callback_query(F.data.startswith("admin_select_manufacturer_for_delete_page:"), StateFilter(AdminProductStates.MANUFACTURER_SELECT_FOR_DELETE))(cq_admin_select_manufacturer_for_delete_paginate)
@@ -1372,10 +1571,10 @@ async def cq_admin_execute_delete_manufacturer(callback: types.CallbackQuery, st
 # router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_NAME), F.text)(fsm_admin_location_name_received)
 # router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_ADDRESS), F.text)(fsm_admin_location_address_received)
 # router.callback_query(F.data.startswith("admin_list_locations_start") | F.data.startswith("admin_locations_list_page:"))(cq_admin_list_locations_start)
-# router.callback_query(F.data.startswith("admin_location_actions:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_location_actions)
-# router.callback_query(F.data.startswith("admin_edit_location_start:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_start)
-# router.callback_query(F.data.startswith("admin_edit_location_field:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_field_prompt)
-# router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_EDIT_NAME, AdminProductStates.LOCATION_AWAIT_EDIT_ADDRESS), F.text)(fsm_admin_location_edit_value_received)
+# router.callback_query(F.data.startswith("admin_location_actions:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_location_actions) # type: ignore
+# router.callback_query(F.data.startswith("admin_edit_location_start:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_start) # type: ignore
+# router.callback_query(F.data.startswith("admin_edit_location_field:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_field_prompt) # type: ignore
+# router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_EDIT_NAME, AdminProductStates.LOCATION_AWAIT_EDIT_ADDRESS), F.text)(fsm_admin_location_edit_value_received) # type: ignore
 # router.callback_query(F.data.startswith("admin_confirm_delete_location_prompt:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_confirm_delete_location_prompt)
 # router.callback_query(F.data.startswith("admin_execute_delete_location:"), StateFilter(AdminProductStates.LOCATION_CONFIRM_DELETE))(cq_admin_execute_delete_location)
 
@@ -1383,7 +1582,7 @@ async def cq_admin_execute_delete_manufacturer(callback: types.CallbackQuery, st
 # --- Location Management Handlers ---
 
 @router.callback_query(F.data == "admin_locations_menu", StateFilter("*"))
-async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext): # type: ignore
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1391,13 +1590,13 @@ async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict
 
     await state.clear() # Clear state when entering the menu
     # Assuming create_admin_location_management_menu_keyboard will be defined in app.keyboards.inline
-    from app.keyboards.inline import create_admin_location_management_menu_keyboard 
-    keyboard = create_admin_location_management_menu_keyboard(lang) 
+    from app.keyboards.inline import create_admin_location_management_menu_keyboard
+    keyboard = create_admin_location_management_menu_keyboard(lang)
     await callback.message.edit_text(get_text("admin_location_management_title", lang), reply_markup=keyboard)
     await callback.answer()
 
 @router.callback_query(F.data == "admin_add_location_start", StateFilter("*"))
-async def cq_admin_add_location_start(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+async def cq_admin_add_location_start(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext): # type: ignore
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1579,8 +1778,29 @@ async def cq_admin_location_actions(callback: types.CallbackQuery, user_data: Di
                             address=location_details.get('address', get_text("not_specified_placeholder", lang)))
     
     # Assuming create_admin_location_item_actions_keyboard will be defined in app.keyboards.inline
-    from app.keyboards.inline import create_admin_location_item_actions_keyboard 
-    keyboard = create_admin_location_item_actions_keyboard(location_id, lang) 
+    from app.keyboards.inline import create_admin_location_item_actions_keyboard
+    keyboard = create_admin_location_item_actions_keyboard(location_id, lang)
 
     await callback.message.edit_text(details_text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
+
+
+# Placeholder for where cq_admin_manufacturers_menu would be if it's a separate entry point
+async def cq_admin_manufacturers_menu_entry_point(message_or_callback: Union[types.Message, types.CallbackQuery], state: FSMContext, user_data: Dict[str, Any]):
+    """Helper to navigate to the main manufacturer menu, e.g. after an action or cancel."""
+    lang = user_data.get("language", "en")
+    # This should ideally call the handler for "admin_manufacturers_menu" callback
+    # For now, let's assume it sends the menu directly
+    target_message = message_or_callback if isinstance(message_or_callback, types.Message) else message_or_callback.message
+    
+    keyboard = create_admin_manufacturer_management_menu_keyboard(lang)
+    text = get_text("admin_manufacturer_management_title", lang)
+    
+    if isinstance(message_or_callback, types.CallbackQuery) and hasattr(target_message, "edit_text"):
+        await target_message.edit_text(text, reply_markup=keyboard)
+    else:
+        await target_message.answer(text, reply_markup=keyboard)
+    
+    if isinstance(message_or_callback, types.CallbackQuery):
+        await message_or_callback.answer()
+    await state.clear() # Clear state when going back to a main menu
