@@ -405,16 +405,7 @@ class ProductRepository:
     async def get_products_by_manufacturer_location(
         self, manufacturer_id: int, location_id: int
     ) -> List[Product]:
-        """
-        Retrieves products from a specific manufacturer that are in stock at a given location.
-        
-        Args:
-            manufacturer_id: The ID of the manufacturer.
-            location_id: The ID of the location.
-        
-        Returns:
-            A list of products from the specified manufacturer available at the given location, including their localizations.
-        """
+        """Get products from manufacturer at location."""
         result = await self.session.execute(
             select(Product)
             .options(selectinload(Product.localizations))
@@ -428,16 +419,6 @@ class ProductRepository:
 
     async def get_all_products_paginated(self, offset: int, limit: int) -> Tuple[List[Product], int]:
         # Query to fetch products with their localizations
-        """
-        Retrieves a paginated list of products with their localizations and the total product count.
-        
-        Args:
-            offset: The number of products to skip before starting to collect the result set.
-            limit: The maximum number of products to return.
-        
-        Returns:
-            A tuple containing a list of products (each with localizations loaded) and the total number of products in the database.
-        """
         stmt = (
             sa.select(Product)
             .options(selectinload(Product.localizations))
@@ -456,16 +437,6 @@ class ProductRepository:
         return products_list, total
 
     async def get_all_categories_paginated(self, offset: int, limit: int) -> Tuple[List[Category], int]:
-        """
-        Retrieves a paginated list of categories and the total number of categories.
-        
-        Args:
-            offset: The number of categories to skip before starting to collect the result set.
-            limit: The maximum number of categories to return.
-        
-        Returns:
-            A tuple containing a list of categories for the current page and the total count of categories.
-        """
         stmt = sa.select(Category).order_by(Category.id).offset(offset).limit(limit)
         categories = await self.session.execute(stmt)
         
@@ -475,16 +446,6 @@ class ProductRepository:
         return list(categories.scalars().all()), total_categories.scalar_one()
 
     async def get_all_manufacturers_paginated(self, offset: int, limit: int) -> Tuple[List[Manufacturer], int]:
-        """
-        Retrieves a paginated list of manufacturers and the total manufacturer count.
-        
-        Args:
-            offset: The number of manufacturers to skip before starting to collect the result set.
-            limit: The maximum number of manufacturers to return.
-        
-        Returns:
-            A tuple containing a list of manufacturers for the current page and the total number of manufacturers.
-        """
         stmt = sa.select(Manufacturer).order_by(Manufacturer.id).offset(offset).limit(limit)
         manufacturers = await self.session.execute(stmt)
         
@@ -494,16 +455,6 @@ class ProductRepository:
         return list(manufacturers.scalars().all()), total_manufacturers.scalar_one()
 
     async def get_all_locations_paginated(self, offset: int, limit: int) -> Tuple[List[Location], int]:
-        """
-        Retrieves a paginated list of locations and the total count of locations.
-        
-        Args:
-            offset: The number of locations to skip before starting to collect the result set.
-            limit: The maximum number of locations to return.
-        
-        Returns:
-            A tuple containing a list of locations for the current page and the total number of locations.
-        """
         stmt = sa.select(Location).order_by(Location.id).offset(offset).limit(limit)
         locations = await self.session.execute(stmt)
         
@@ -515,18 +466,6 @@ class ProductRepository:
     async def get_all_locations_for_product_stock(self, offset: int, limit: int) -> Tuple[List[Location], int]:
         # This is similar to get_all_locations_paginated for now
         # Future enhancements could filter locations relevant to a specific product
-        """
-        Retrieves a paginated list of locations and the total count for product stock management.
-        
-        Currently returns all locations with pagination; future enhancements may filter by product relevance.
-        
-        Args:
-            offset: The number of records to skip.
-            limit: The maximum number of records to return.
-        
-        Returns:
-            A tuple containing a list of locations and the total number of locations.
-        """
         stmt = sa.select(Location).order_by(Location.id).offset(offset).limit(limit)
         locations = await self.session.execute(stmt)
         
