@@ -1431,6 +1431,98 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
 # The focus of this update was User Management and setting up Settings/Stats views.
 
 # --- Manufacturer Delete Handlers ---
+
+# --- Manufacturer Add Handlers ---
+@router.callback_query(F.data == "admin_mfg_add_start", StateFilter("*"))
+async def cq_admin_mfg_add_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    await state.set_state(AdminProductStates.MANUFACTURER_AWAIT_NAME)
+    
+    prompt_text = get_text("admin_mfg_enter_name_prompt", lang, default="Please enter the name for the new manufacturer:")
+    cancel_info = get_text("cancel_prompt", lang)
+    
+    full_prompt = f"{prompt_text}\n\n{hitalic(cancel_info)}"
+    
+    try:
+        await callback.message.edit_text(full_prompt, parse_mode="HTML", reply_markup=None) # Remove previous keyboard
+    except Exception as e:
+        logger.info(f"Editing message for admin_mfg_add_start failed, sending new: {e}")
+        # Send as a new message if edit fails, ensuring ReplyKeyboardRemove to clear any prior reply keyboards
+        await callback.message.answer(full_prompt, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        
+    await callback.answer()
+
+@router.message(StateFilter(AdminProductStates.MANUFACTURER_AWAIT_NAME), F.text)
+async def fsm_admin_manufacturer_name_received(message: types.Message, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        await message.answer(get_text("admin_action_cancelled", lang), reply_markup=types.ReplyKeyboardRemove())
+        await state.clear()
+        # To navigate back to the manufacturer menu, we can simulate a callback query
+        # or directly call the menu handler if it's structured to be callable this way.
+        # For simplicity and re-use, we'll mock a callback.
+        # A temporary message is needed for the mock callback's message attribute.
+        temp_msg_for_menu = await message.answer(get_text("loading_text", lang, default=".")) 
+        mock_callback = types.CallbackQuery(
+            id=str(message.message_id) + "_cancel_mfg_add",
+            from_user=message.from_user,
+            chat_instance=str(message.chat.id),
+            message=temp_msg_for_menu, # Use the temporary message
+            data="admin_manufacturers_menu" 
+        )
+        await cq_admin_manufacturers_main_menu(mock_callback, state, user_data)
+        if hasattr(temp_msg_for_menu, 'delete'): # Clean up the temporary message
+            await temp_msg_for_menu.delete()
+        return
+
+    sanitized_name = sanitize_input(message.text)
+
+    if not sanitized_name:
+        error_msg = get_text("admin_mfg_name_empty_error", lang, default="Manufacturer name cannot be empty. Please try again.")
+        prompt_text = get_text("admin_mfg_enter_name_prompt", lang, default="Please enter the name for the new manufacturer:")
+        cancel_info = get_text("cancel_prompt", lang)
+        full_reprompt = f"{error_msg}\n\n{prompt_text}\n\n{hitalic(cancel_info)}"
+        await message.answer(full_reprompt, parse_mode="HTML")
+        return
+
+    product_service = ProductService()
+    created_manufacturer, message_key, _ = await product_service.create_manufacturer(name=sanitized_name, lang=lang)
+
+    if created_manufacturer:
+        success_msg = get_text(message_key, lang, name=hcode(created_manufacturer['name']))
+        await message.answer(success_msg, parse_mode="HTML")
+    else:
+        # message_key here would be an error string like "admin_mfg_already_exists_error"
+        # or "admin_mfg_create_failed_error"
+        error_msg = get_text(message_key, lang, name=hcode(sanitized_name))
+        await message.answer(error_msg, parse_mode="HTML")
+
+    await state.clear()
+    
+    # Send manufacturer management menu again
+    # Similar to cancel, mock a callback to cq_admin_manufacturers_main_menu
+    temp_msg_for_menu_after_create = await message.answer(get_text("loading_text", lang, default="."), reply_markup=types.ReplyKeyboardRemove())
+    mock_callback_after_create = types.CallbackQuery(
+        id=str(message.message_id) + "_after_mfg_add",
+        from_user=message.from_user,
+        chat_instance=str(message.chat.id),
+        message=temp_msg_for_menu_after_create,
+        data="admin_manufacturers_menu"
+    )
+    await cq_admin_manufacturers_main_menu(mock_callback_after_create, state, user_data)
+    if hasattr(temp_msg_for_menu_after_create, 'delete'): # Clean up temporary message
+        await temp_msg_for_menu_after_create.delete()
+
+
 async def _send_paginated_manufacturers_for_delete(
     event: Union[types.Message, types.CallbackQuery], 
     state: FSMContext, 

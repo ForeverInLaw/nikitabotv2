@@ -319,6 +319,46 @@ class ProductService:
                  await session.rollback() # Rollback on error
             return False, "admin_manufacturer_delete_failed", manufacturer_name
 
+    async def create_manufacturer(self, name: str, lang: str = "en") -> Tuple[Optional[Dict[str, Any]], str, Optional[int]]:
+        """
+        Creates a new manufacturer.
+        Returns a tuple: (created_manufacturer_dict, message_key, manufacturer_id).
+        """
+        try:
+            async with get_session() as session:
+                product_repo = ProductRepository(session)
+                
+                created_mfg: Optional[Manufacturer] = await product_repo.create_manufacturer(name=name)
+                
+                if created_mfg:
+                    await session.commit() # Commit only if manufacturer was created by repo and no error
+                    logger.info(f"Manufacturer '{created_mfg.name}' (ID: {created_mfg.id}) created successfully.")
+                    return (
+                        {"id": created_mfg.id, "name": created_mfg.name},
+                        "admin_mfg_created_successfully",
+                        created_mfg.id
+                    )
+                else:
+                    # This path is taken if repo returns None (duplicate or SQLAlchemyError it handled)
+                    # We assume "duplicate" as the primary reason for None if no exception bubbled up.
+                    # The repo logs specifics if it was another SQLAlchemyError.
+                    await session.rollback() # Ensure rollback if repo returned None for any reason.
+                    logger.warning(f"Manufacturer creation failed for name '{name}', likely due to duplicate or DB issue handled by repo.")
+                    return None, "admin_mfg_create_failed_duplicate", None
+                    
+        except SQLAlchemyError as e: # Catch SQLAlchemy errors that might occur if repo re-raises or if session ops fail
+            # This block might be redundant if repo catches all SQLAlchemyErrors, but good for safety.
+            logger.error(f"Database error during manufacturer creation for name '{name}': {e}", exc_info=True)
+            # Attempt to rollback if session is available and active
+            if 'session' in locals() and hasattr(session, 'is_active') and session.is_active:
+                await session.rollback()
+            return None, "admin_mfg_create_failed_db_error", None
+        except Exception as e: # Catch any other unexpected errors (e.g., get_session failure)
+            logger.error(f"Unexpected error during manufacturer creation for name '{name}': {e}", exc_info=True)
+            if 'session' in locals() and hasattr(session, 'is_active') and session.is_active:
+                await session.rollback()
+            return None, "admin_mfg_create_failed_db_error", None # Generic DB error for unexpected issues
+
     async def update_manufacturer_details(
         self, manufacturer_id: int, name: str, lang: str = "en"
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:

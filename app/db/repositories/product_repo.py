@@ -10,7 +10,7 @@ from decimal import Decimal
 from sqlalchemy import select, insert, update, delete, func
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError # Ensure SQLAlchemyError is imported
 
 
 from app.db.models import Product, ProductLocalization, ProductStock, Location, Manufacturer, Category, Base 
@@ -268,12 +268,30 @@ class ProductRepository:
         return result.rowcount > 0
 
     # --- Manufacturer Methods ---
-    async def create_manufacturer(self, name: str) -> Manufacturer:
-        """Create a new manufacturer."""
-        manufacturer = Manufacturer(name=name)
-        self.session.add(manufacturer)
-        await self.session.flush()
-        return manufacturer
+    async def create_manufacturer(self, name: str) -> Optional[Manufacturer]:
+        """
+        Create a new manufacturer if one with the same name (case-insensitive) doesn't already exist.
+        """
+        try:
+            # Case-insensitive check for existing manufacturer
+            stmt = select(Manufacturer).where(func.lower(Manufacturer.name) == func.lower(name))
+            result = await self.session.execute(stmt)
+            existing_manufacturer = result.scalar_one_or_none()
+
+            if existing_manufacturer:
+                logger.warning(f"Manufacturer with name '{name}' already exists (ID: {existing_manufacturer.id}). Creation aborted.")
+                return None
+
+            new_manufacturer = Manufacturer(name=name)
+            self.session.add(new_manufacturer)
+            await self.session.flush()  # Persist to get ID
+            await self.session.refresh(new_manufacturer) # Ensure all attributes are loaded
+            logger.info(f"Manufacturer '{name}' created successfully with ID {new_manufacturer.id}.")
+            return new_manufacturer
+        except SQLAlchemyError as e:
+            logger.error(f"Database error while creating manufacturer '{name}': {e}")
+            await self.session.rollback()
+            return None
 
     async def get_manufacturer_by_id(self, manufacturer_id: int) -> Optional[Manufacturer]:
         """Get manufacturer by ID."""
