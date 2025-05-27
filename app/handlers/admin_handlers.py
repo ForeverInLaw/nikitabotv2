@@ -302,6 +302,81 @@ async def cq_admin_panel_main(callback: types.CallbackQuery, state: FSMContext, 
     await callback.message.edit_text(get_text("admin_panel_title", lang), reply_markup=create_admin_keyboard(lang))
     await callback.answer()
 
+# --- Product Management Menu Handler ---
+@router.callback_query(F.data == "admin_products_menu", StateFilter("*"))
+async def cq_admin_products_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    keyboard = create_admin_product_management_menu_keyboard(lang)
+    await callback.message.edit_text(get_text("admin_product_management_title", lang), reply_markup=keyboard)
+    await callback.answer()
+
+# --- Stock Management Menu Handler ---
+@router.callback_query(F.data == "admin_stock_menu", StateFilter("*"))
+async def cq_admin_stock_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    # Assuming "admin_stock_management_title" text key exists or will be added.
+    # Using "Stock Management" as a placeholder if the key is missing, as per instructions.
+    title_text = get_text("admin_stock_management_title", lang, default="Stock Management")
+    keyboard = create_admin_stock_management_menu_keyboard(lang)
+    
+    try:
+        await callback.message.edit_text(title_text, reply_markup=keyboard)
+    except Exception as e: # Fallback if edit fails (e.g. message not modified)
+        logger.info(f"Editing message for admin_stock_menu failed, sending new: {e}")
+        await callback.message.answer(title_text, reply_markup=keyboard)
+        
+    await callback.answer()
+
+# --- Manufacturer Management Menu Handler ---
+@router.callback_query(F.data == "admin_manufacturers_menu", StateFilter("*"))
+async def cq_admin_manufacturers_main_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    title_text = get_text("admin_manufacturer_management_title", lang, default="Manufacturer Management")
+    keyboard = create_admin_manufacturer_management_menu_keyboard(lang)
+    
+    try:
+        await callback.message.edit_text(title_text, reply_markup=keyboard)
+    except Exception as e:
+        logger.info(f"Editing message for admin_manufacturers_menu failed, sending new: {e}")
+        await callback.message.answer(title_text, reply_markup=keyboard)
+        
+    await callback.answer()
+
+# --- Category Management Menu Handler ---
+@router.callback_query(F.data == "admin_categories_menu", StateFilter("*"))
+async def cq_admin_categories_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    title_text = get_text("admin_category_management_title", lang, default="Category Management")
+    keyboard = create_admin_category_management_menu_keyboard(lang)
+    
+    try:
+        await callback.message.edit_text(title_text, reply_markup=keyboard)
+    except Exception as e:
+        logger.info(f"Editing message for admin_categories_menu failed, sending new: {e}")
+        await callback.message.answer(title_text, reply_markup=keyboard)
+        
+    await callback.answer()
+
 # --- User Management Handlers ---
 @router.callback_query(F.data == "admin_users_menu")
 async def cq_admin_users_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
@@ -665,7 +740,7 @@ async def cq_admin_execute_delete_location(callback: types.CallbackQuery, state:
 
 # --- Universal Cancel for Admin FSM Actions (Ensure Location States are Handled) ---
 # The existing universal_cancel_admin_action should be reviewed to ensure it handles
-# AdminProductStates.LOCATION_AWAIT_NAME, LOCATION_AWAIT_ADDRESS, 
+# AdminProductStates.LOCATION_AWAIT_NAME, LOCATION_AWAIT_ADDRESS,
 # LOCATION_AWAIT_EDIT_NAME, LOCATION_AWAIT_EDIT_ADDRESS, LOCATION_CONFIRM_DELETE
 # and navigates appropriately, likely back to cq_admin_locations_menu or cq_admin_location_actions.
 
@@ -1324,10 +1399,12 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
                      # If cancelling during product creation, go to product management menu
                      target_message_text = get_text("admin_product_management_title", lang)
                      target_reply_markup = create_admin_product_management_menu_keyboard(lang)
-                 else:
-                     # This is the original content of the else, now the else to the new if
+                 elif current_fsm_state_obj.startswith("AdminProductStates:"): # Catch-all for other product states
+                     # Default for other product states (e.g. product, category, manufacturer)
+                     # Navigate to product management menu
                      target_message_text = get_text("admin_product_management_title", lang)
                      target_reply_markup = create_admin_product_management_menu_keyboard(lang)
+
 
         elif current_fsm_state_obj.startswith("AdminSettingsStates:"):
              target_message_text = get_text("admin_settings_title", lang)
@@ -2912,15 +2989,26 @@ async def _send_paginated_products_list(
     # The 'name' field from get_products_for_admin_list is already formatted for display.
     # It includes name, then SKU and cost, e.g., "Product A (SKU: 123) - 10.99 USD"
     # So, item_text_key="name" should work directly.
+    # Define base_callback_data and item_callback_prefix, or allow override if needed.
+    current_base_callback_data = "admin_prod_list_page" # Default for general product list
+    current_item_callback_prefix = "admin_prod_view" # Default for viewing product
+
+    # Example of how overrides might be used if this function was more generic:
+    # base_callback_data_to_use = base_callback_data_override or current_base_callback_data
+    # item_callback_prefix_to_use = item_callback_prefix_override or current_item_callback_prefix
+    # back_callback_key_to_use = back_callback_key_override or "back_to_product_management"
+    # back_callback_data_to_use = back_callback_data_override or "admin_products_menu"
+
+
     keyboard = create_paginated_keyboard(
         items=products_on_page_data,
         page=page,
         items_per_page=ITEMS_PER_PAGE_ADMIN,
-        base_callback_data=base_callback_data_override or "admin_prod_list_page",
-        item_callback_prefix=item_callback_prefix_override or "admin_prod_view",
+        base_callback_data=current_base_callback_data, # Use defined or overridden
+        item_callback_prefix=current_item_callback_prefix, # Use defined or overridden
         language=lang,
-        back_callback_key=back_callback_key_override or "back_to_product_management",
-        back_callback_data=back_callback_data_override or "admin_products_menu",
+        back_callback_key="back_to_product_management", # Default or allow override
+        back_callback_data="admin_products_menu", # Default or allow override
         total_items_override=total_products,
         item_text_key="name", 
         item_id_key="id"
