@@ -360,7 +360,9 @@ def create_admin_category_management_menu_keyboard(language: str) -> InlineKeybo
 def create_admin_manufacturer_management_menu_keyboard(language: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text=get_text("admin_action_add", language), callback_data="admin_mfg_add_start")) 
-    builder.row(InlineKeyboardButton(text=get_text("admin_action_list", language), callback_data="admin_mfg_list:0"))
+    builder.row(InlineKeyboardButton(text=get_text("admin_action_list", language), callback_data="admin_mfg_list:0")) # Assuming list functionality exists or will be added
+    # Add other actions like edit if needed
+    builder.row(InlineKeyboardButton(text=get_text("admin_delete_manufacturer_button", language), callback_data="admin_delete_manufacturer_start"))
     builder.row(create_back_button("back_to_admin_main_menu", language, "admin_panel_main"))
     return builder.as_markup()
     

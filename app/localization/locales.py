@@ -264,36 +264,72 @@ TEXTS: Dict[str, Dict[Optional[str], str]] = { # Allow Optional[str] for languag
     "stats_total_orders": {"en": "Total Orders: {count}", "ru": "Всего заказов: {count}", "pl": "Łącznie zamówień: {count}"},
     "stats_pending_orders": {"en": "Pending Approval Orders: {count}", "ru": "Заказы ожидают подтверждения: {count}", "pl": "Zamówienia oczekujące na zatwierdzenie: {count}"},
     "stats_total_products": {"en": "Total Products (approx.): {count}", "ru": "Всего товаров (прибл.): {count}", "pl": "Łącznie produktów (około): {count}"}, # Needs proper count method in ProductService
+
+    # Manufacturer Delete Specific
+    "admin_delete_manufacturer_button": {"en": "Delete Manufacturer", "ru": "Удалить производителя", "pl": "Usuń producenta"},
+    "admin_select_manufacturer_to_delete_title": {"en": "Select Manufacturer to Delete", "ru": "Выберите производителя для удаления", "pl": "Wybierz producenta do usunięcia"},
+    "admin_no_manufacturers_to_delete": {"en": "No manufacturers available to delete.", "ru": "Нет производителей для удаления.", "pl": "Brak producentów do usunięcia."},
+    "admin_confirm_delete_manufacturer_prompt": {"en": "Are you sure you want to delete manufacturer '{name}'? If products are linked, this operation will fail.", "ru": "Вы уверены, что хотите удалить производителя '{name}'? Если есть связанные товары, операция не удастся.", "pl": "Czy na pewno chcesz usunąć producenta '{name}'? Jeśli produkty są powiązane, ta operacja nie powiedzie się."},
+    "admin_manufacturer_deleted_successfully": {"en": "Manufacturer '{name}' has been deleted successfully.", "ru": "Производитель '{name}' успешно удален.", "pl": "Producent '{name}' został pomyślnie usunięty."},
+    "admin_manufacturer_delete_failed": {"en": "Failed to delete manufacturer '{name}'. An unexpected error occurred.", "ru": "Не удалось удалить производителя '{name}'. Произошла непредвиденная ошибка.", "pl": "Nie udało się usunąć producenta '{name}'. Wystąpił nieoczekiwany błąd."},
+    "admin_manufacturer_not_found": {"en": "Manufacturer not found.", "ru": "Производитель не найден.", "pl": "Nie znaleziono producenta."},
+    "admin_manufacturer_delete_has_products_error": {"en": "Cannot delete manufacturer '{name}' as it is linked to existing products. Please reassign or delete these products first.", "ru": "Невозможно удалить производителя '{name}', так как он связан с существующими товарами. Пожалуйста, переназначьте или удалите эти товары сначала.", "pl": "Nie można usunąć producenta '{name}', ponieważ jest on powiązany z istniejącymi produktami. Najpierw przenieś lub usuń te produkty."},
+
+    # Location Service Specific
+    "not_specified_placeholder": {"en": "Not specified", "ru": "Не указано", "pl": "Nie określono"},
+    "no_address_placeholder": {"en": "No address", "ru": "Без адреса", "pl": "Brak adresu"},
+    "admin_location_already_exists_error": {"en": "Error: A location with this name already exists.", "ru": "Ошибка: Локация с таким названием уже существует.", "pl": "Błąd: Lokalizacja o tej nazwie już istnieje."},
+    "admin_location_create_failed_error": {"en": "Error: Failed to create the location.", "ru": "Ошибка: Не удалось создать локацию.", "pl": "Błąd: Nie udało się utworzyć lokalizacji."},
+    "admin_db_error_generic": {"en": "Database error. Please try again later.", "ru": "Ошибка базы данных. Пожалуйста, попробуйте позже.", "pl": "Błąd bazy danych. Spróbuj ponownie później."},
+    "admin_unexpected_error_generic": {"en": "An unexpected error occurred. Please try again later.", "ru": "Произошла непредвиденная ошибка. Пожалуйста, попробуйте позже.", "pl": "Wystąpił nieoczekiwany błąd. Spróbuj ponownie później."},
+    "admin_location_name_exists_error": {"en": "Error: Another location with this name already exists.", "ru": "Ошибка: Другая локация с таким названием уже существует.", "pl": "Błąd: Inna lokalizacja o tej nazwie już istnieje."},
+    "admin_location_not_found_error": {"en": "Error: Location not found.", "ru": "Ошибка: Локация не найдена.", "pl": "Błąd: Nie znaleziono lokalizacji."},
+    "admin_location_update_failed_error": {"en": "Error: Failed to update the location.", "ru": "Ошибка: Не удалось обновить локацию.", "pl": "Błąd: Nie udało się zaktualizować lokalizacji."},
+    "admin_location_deleted_successfully": {"en": "Location '{name}' has been deleted successfully.", "ru": "Локация '{name}' успешно удалена.", "pl": "Lokalizacja '{name}' została pomyślnie usunięta."},
+    "admin_location_delete_has_dependencies_error": {"en": "Error: Cannot delete location '{name}' as it has associated records (e.g., stock, orders). Please remove dependencies first.", "ru": "Ошибка: Невозможно удалить локацию '{name}', так как она связана с записями (например, остатки, заказы). Сначала удалите зависимости.", "pl": "Błąd: Nie można usunąć lokalizacji '{name}', ponieważ ma powiązane rekordy (np. stany magazynowe, zamówienia). Najpierw usuń zależności."},
+    "admin_location_delete_failed_error": {"en": "Error: Failed to delete location '{name}'.", "ru": "Ошибка: Не удалось удалить локацию '{name}'.", "pl": "Błąd: Nie udało się usunąć lokalizacji '{name}'."},
 }
 
-def get_text(key: str, language: Optional[str], default: Optional[str] = None) -> str:
+def get_text(key: str, language: Optional[str], default: Optional[str] = None, **kwargs: Any) -> str: # Ensure kwargs is here
     """
     Get localized text for a given key and language.
     Falls back to English or a provided default if the key or language is not found.
+    Supports keyword arguments for formatting.
     """
     if language is None:
         language = "en" # Default to English if no language provided
 
+    final_text = f"[[{key}]]" # Default if nothing found
+
     lang_texts = TEXTS.get(key)
     if lang_texts:
-        text = lang_texts.get(language)
-        if text is not None:
-            return text
-        # Fallback to English if specific language not found for the key
-        text_en = lang_texts.get("en")
-        if text_en is not None:
-            # Log fallback for missing specific language translation
-            # logger.debug(f"Text key '{key}' not found for language '{language}', falling back to English.")
-            return text_en
+        text_for_lang = lang_texts.get(language)
+        if text_for_lang is not None:
+            final_text = text_for_lang
+        else:
+            # Fallback to English if specific language not found for the key
+            text_en = lang_texts.get("en")
+            if text_en is not None:
+                # logger.debug(f"Text key '{key}' not found for language '{language}', falling back to English.")
+                final_text = text_en
+            # If English also not found, final_text remains "[[{key}]]"
     
-    # If key itself is not found, or English version of key is not found
-    if default is not None:
+    # If key itself was not found at all, lang_texts would be None
+    # In this case, if a default is provided, use it. Otherwise, final_text is "[[{key}]]"
+    if lang_texts is None and default is not None:
         # logger.warning(f"Text key '{key}' not found. Using provided default.")
-        return default
+        final_text = default
     
-    # Fallback for completely missing key, return key itself to indicate missing translation
-    # logger.error(f"Text key '{key}' not found, and no default provided. Returning key name.")
-    return f"[[{key}]]" # Indicate missing translation
+    # Attempt to format the string if kwargs are provided
+    if kwargs:
+        try:
+            return final_text.format(**kwargs)
+        except KeyError as e:
+            logger.error(f"Missing key '{e}' in text for '{key}' with language '{language}' and format args {kwargs}. Text: '{final_text}'")
+            # Return the unformatted string or a modified error indicator
+            return f"[[FORMAT_ERROR:{key}]]" 
+            
+    return final_text
 
 
 def get_all_texts_for_language(language: str) -> Dict[str, str]:

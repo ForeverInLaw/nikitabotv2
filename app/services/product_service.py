@@ -7,9 +7,12 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 
+from sqlalchemy import select # Added import
+from sqlalchemy.exc import SQLAlchemyError # Added import
+
 from app.db.database import get_session
 from app.db.repositories.product_repo import ProductRepository
-from app.db.models import Product, Location, Manufacturer, Category
+from app.db.models import Product, Location, Manufacturer, Category # Ensure Manufacturer and Product are here
 from app.localization.locales import get_text
 from app.utils.helpers import format_price
 
@@ -228,3 +231,86 @@ class ProductService:
             logger.error(f"Error releasing stock for product {product_id} at location {location_id}: {e}", exc_info=True)
             return False
 
+    async def get_all_entities_paginated(
+        self, entity_type: str, page: int, items_per_page: int, language: str = "en"
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Fetches a paginated list of entities (Location or Manufacturer)
+        and the total count of such entities.
+        """
+        try:
+            async with get_session() as session:
+                product_repo = ProductRepository(session)
+                if entity_type == "location":
+                    entities, total_count = await product_repo.get_all_locations_paginated(page, items_per_page)
+                elif entity_type == "manufacturer":
+                    entities, total_count = await product_repo.get_all_manufacturers_paginated(page, items_per_page)
+                else:
+                    return [], 0
+                
+                return [{"id": entity.id, "name": entity.name} for entity in entities], total_count
+        except Exception as e:
+            logger.error(f"Error getting paginated {entity_type}: {e}", exc_info=True)
+            return [], 0
+
+    async def get_entity_by_id(
+        self, entity_type: str, entity_id: int, language: str = "en"
+    ) -> Optional[Dict[str, Any]]:
+        """Fetches a single entity (Location or Manufacturer) by its ID."""
+        try:
+            async with get_session() as session:
+                product_repo = ProductRepository(session)
+                entity: Optional[Location | Manufacturer] = None
+                if entity_type == "location":
+                    entity = await product_repo.get_location_by_id(entity_id)
+                elif entity_type == "manufacturer":
+                    entity = await product_repo.get_manufacturer_by_id(entity_id)
+                
+                if entity:
+                    return {"id": entity.id, "name": entity.name}
+                return None
+        except Exception as e:
+            logger.error(f"Error getting {entity_type} by ID {entity_id}: {e}", exc_info=True)
+            return None
+
+    async def delete_manufacturer_by_id(self, manufacturer_id: int, lang: str) -> Tuple[bool, str, Optional[str]]:
+        """
+        Deletes a manufacturer by its ID.
+        Returns a tuple: (success_status, message_key, optional_manufacturer_name).
+        """
+        manufacturer_entity = await self.get_entity_by_id("manufacturer", manufacturer_id, lang)
+        if not manufacturer_entity:
+            return False, "admin_manufacturer_not_found", None
+        
+        manufacturer_name = manufacturer_entity.get("name")
+
+        try:
+            async with get_session() as session: # Use get_session for db interactions
+                # Check for linked products
+                product_exists_stmt = select(Product).filter_by(manufacturer_id=manufacturer_id).limit(1)
+                product_result = await session.execute(product_exists_stmt)
+                product = product_result.scalar_one_or_none()
+
+                if product:
+                    logger.warning(f"Attempt to delete manufacturer {manufacturer_id} ({manufacturer_name}) failed: linked products exist.")
+                    return False, "admin_manufacturer_delete_has_products_error", manufacturer_name
+
+                # Delete manufacturer
+                to_delete = await session.get(Manufacturer, manufacturer_id)
+                if to_delete:
+                    await session.delete(to_delete)
+                    await session.commit()
+                    logger.info(f"Manufacturer {manufacturer_id} ({manufacturer_name}) deleted successfully.")
+                    return True, "admin_manufacturer_deleted_successfully", manufacturer_name
+                else:
+                    # This case should ideally be caught by get_entity_by_id, but as a fallback:
+                    logger.warning(f"Manufacturer {manufacturer_id} ({manufacturer_name}) not found for deletion after initial check.")
+                    return False, "admin_manufacturer_not_found", manufacturer_name
+        except SQLAlchemyError as e:
+            logger.error(f"Database error while deleting manufacturer {manufacturer_id} ({manufacturer_name}): {e}", exc_info=True)
+            await session.rollback() # Rollback on error
+            return False, "admin_manufacturer_delete_failed", manufacturer_name
+        except Exception as e: # Catch any other unexpected errors
+            logger.error(f"Unexpected error while deleting manufacturer {manufacturer_id} ({manufacturer_name}): {e}", exc_info=True)
+            await session.rollback() # Rollback on error
+            return False, "admin_manufacturer_delete_failed", manufacturer_name
