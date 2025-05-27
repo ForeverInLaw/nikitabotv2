@@ -369,7 +369,7 @@ def create_admin_manufacturer_management_menu_keyboard(language: str) -> InlineK
 def create_admin_location_management_menu_keyboard(language: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text=get_text("admin_action_add", language), callback_data="admin_loc_add_start")) 
-    builder.row(InlineKeyboardButton(text=get_text("admin_action_list", language), callback_data="admin_loc_list:0"))
+    builder.row(InlineKeyboardButton(text=get_text("admin_action_list", language), callback_data="admin_list_locations_start"))
     builder.row(create_back_button("back_to_admin_main_menu", language, "admin_panel_main"))
     return builder.as_markup()
     
