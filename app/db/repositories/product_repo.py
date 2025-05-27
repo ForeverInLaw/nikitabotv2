@@ -30,7 +30,7 @@ class ProductRepository:
         name: str,
         manufacturer_id: int,
         price: Decimal,
-        category_id: Optional[int] = None,
+        category_id: int,
         image_url: Optional[str] = None,
         variation: Optional[str] = None
     ) -> Product:

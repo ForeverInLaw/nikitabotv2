@@ -83,7 +83,7 @@ class Product(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     manufacturer_id: Mapped[int] = mapped_column(Integer, ForeignKey("manufacturers.id"), nullable=False)
-    category_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("categories.id"), nullable=True)
+    category_id: Mapped[int] = mapped_column(Integer, ForeignKey("categories.id"), nullable=False)
     image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     variation: Mapped[Optional[str]] = mapped_column(String(255))
     price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False) # Price
@@ -92,7 +92,7 @@ class Product(Base):
 
     # Relationships
     manufacturer: Mapped["Manufacturer"] = relationship("Manufacturer", back_populates="products")
-    category: Mapped[Optional["Category"]] = relationship("Category", back_populates="products")
+    category: Mapped["Category"] = relationship("Category", back_populates="products") # Removed Optional from Mapped
     localizations: Mapped[List["ProductLocalization"]] = relationship("ProductLocalization", back_populates="product", cascade="all, delete-orphan")
     stocks: Mapped[List["ProductStock"]] = relationship("ProductStock", back_populates="product", cascade="all, delete-orphan")
     order_items: Mapped[List["OrderItem"]] = relationship("OrderItem", back_populates="product") 

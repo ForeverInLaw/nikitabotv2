@@ -441,13 +441,16 @@ class ProductService:
                     return None, "admin_error_manufacturer_not_found", None
 
 
-                # Validate Category ID (if provided)
-                category_id = product_data.get("category_id")
-                if category_id: # Category can be optional
-                    category = await product_repo.get_category_by_id(category_id)
-                    if not category:
-                        logger.warning(f"Admin {admin_id} attempting to create product with non-existent category ID {category_id}.")
-                        return None, "admin_error_category_not_found", None
+                # Validate Category ID (now mandatory)
+                category_id = product_data.get("category_id") # Still use .get() initially to check presence
+                if category_id is None: # Explicitly check if it's missing
+                    logger.error(f"Admin {admin_id} - product creation attempt without category_id. This should be caught by FSM.")
+                    return None, "admin_error_category_not_found", None # Or a more specific error key
+
+                category = await product_repo.get_category_by_id(category_id)
+                if not category:
+                    logger.warning(f"Admin {admin_id} attempting to create product with non-existent category ID {category_id}.")
+                    return None, "admin_error_category_not_found", None
                 
                 # Convert price back to Decimal before passing to repository
                 # Assuming product_data comes in with "price" key from the caller FSM/handler
@@ -480,7 +483,7 @@ class ProductService:
                 new_product = await product_repo.create_product(
                     name=product_name_for_table, # Pass the extracted name
                     manufacturer_id=product_data["manufacturer_id"],
-                    category_id=product_data.get("category_id"), # Optional
+                    category_id=product_data["category_id"], # Changed to direct access
                     price=product_data["price"], # Changed from cost=product_data["cost"]
                     variation=product_data.get("variation"), # Optional
                     image_url=product_data.get("image_url") # Optional

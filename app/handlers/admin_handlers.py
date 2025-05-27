@@ -177,26 +177,35 @@ async def _send_paginated_entities_for_selection(
     title_key = f"admin_prod_enter_{entity_type}_id" # e.g., admin_prod_enter_manufacturer_id
     title = get_text(title_key, lang)
     
-    # Add instruction about skipping category selection
-    if entity_type == "category":
+    # For product creation, category is mandatory.
+    is_category_creation_flow = entity_type == "category" and "admin_prod_create" in (item_callback_prefix_override or "admin_prod_create_select_category")
+
+    if not is_category_creation_flow and entity_type == "category": # For other flows (e.g. edit), skip might be allowed or handled differently
         title += "\n\n" + hitalic(get_text("admin_prod_category_skip_instruction", lang))
 
+    if not entities_on_page_data and page == 0:
+        if entity_type == "manufacturer": # Manufacturer is mandatory
+            empty_text = title + "\n\n" + get_text(f"admin_no_{entity_type}s_found_for_product_creation", lang, entity=entity_type)
+            kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_management", lang, "admin_products_menu")).as_markup()
+        elif is_category_creation_flow: # Category is mandatory for creation, error if none exist
+            empty_text = title + "\n\n" + get_text("admin_no_categories_for_product_creation_error", lang, default="No categories found. Please add a category first.")
+            kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_management", lang, "admin_products_menu")).as_markup()
+        else: # Other scenarios (e.g., optional category selection during product edit) might still proceed or have different buttons
+            empty_text = title + "\n\n" + get_text(f"admin_no_{entity_type}s_found", lang, entity=entity_type) # Generic "not found"
+            # Default back button or allow override to define behavior
+            kb = InlineKeyboardBuilder().row(create_back_button(back_callback_key_override or "cancel_add_product", lang, back_callback_data_override or "admin_prod_add_cancel_to_menu")).as_markup()
+            # If additional_buttons_override is used, it might already include a skip or other relevant action
 
-    if not entities_on_page_data and page == 0 and entity_type == "manufacturer": # Manufacturer is mandatory
-        empty_text = title + "\n\n" + get_text(f"admin_no_{entity_type}s_found_for_product_creation", lang, entity=entity_type)
-        # Back to product management menu if no manufacturers to select
-        kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_management", lang, "admin_products_menu")).as_markup()
-        
         target_message = event.message if isinstance(event, types.CallbackQuery) else event
         if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
-             await target_message.edit_text(empty_text, reply_markup=kb)
+            await target_message.edit_text(empty_text, reply_markup=kb)
         else:
-             await target_message.answer(empty_text, reply_markup=kb)
+            await target_message.answer(empty_text, reply_markup=kb)
         if isinstance(event, types.CallbackQuery): await event.answer()
         return
     
-    # For categories, if none are found, it's fine, user can skip.
-    # The keyboard will show a "Skip" button in this case if entity_type is category.
+    # For categories, if none are found, it's fine, user can skip (logic moved up for creation).
+    # The keyboard will show a "Skip" button in this case if entity_type is category (unless it's creation flow).
 
     current_fsm_state = AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID
     item_callback_prefix = item_callback_prefix_override or ("admin_prod_create_select_manufacturer" if entity_type == "manufacturer" else "admin_prod_create_select_category")
@@ -214,10 +223,11 @@ async def _send_paginated_entities_for_selection(
     await state.update_data({f"current_{entity_type}_selection_page": page}) 
 
     final_additional_buttons = additional_buttons_override
-    # Default skip button for category creation if no override is provided
-    if entity_type == "category" and "create" in item_callback_prefix and additional_buttons_override is None:
+    # Default skip button for category creation if no override is provided AND it's not the product creation flow
+    if entity_type == "category" and "create" in item_callback_prefix and not is_category_creation_flow and additional_buttons_override is None:
         final_additional_buttons = [[InlineKeyboardButton(text=get_text("skip", lang), callback_data=f"{item_callback_prefix}:skip")]]
     # For category edit, additional_buttons_override will be used if provided (e.g. "Skip and Remove")
+    # For product creation category selection (is_category_creation_flow=True), no skip button is added by default.
 
 
     keyboard = create_paginated_keyboard(
@@ -2201,28 +2211,26 @@ async def cq_admin_prod_create_select_category(callback: types.CallbackQuery, st
         return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
 
     category_id_str = callback.data.split(":")[1]
-    category_id = None
-    category_name = get_text("not_applicable_short", lang) # Default if skipped
+    # category_id = None # No longer default to None
+    # category_name = get_text("not_applicable_short", lang) # No longer default if skipped
 
-    if category_id_str.lower() == "skip":
-        category_id = None
-    else:
-        try:
-            category_id = int(category_id_str)
-            # Verify category exists
-            category = await product_service.get_entity_by_id("category", category_id, lang)
-            if not category:
-                await callback.answer(get_text("admin_error_category_not_found_short", lang), show_alert=True)
-                current_page = (await state.get_data()).get("current_category_selection_page", 0)
-                return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=current_page)
-            category_name = category.get("name", str(category_id))
-        except ValueError:
-            await callback.answer(get_text("error_occurred", lang), show_alert=True)
+    # Skip logic is removed, category_id_str must be an integer
+    try:
+        category_id = int(category_id_str)
+        # Verify category exists
+        category = await product_service.get_entity_by_id("category", category_id, lang)
+        if not category:
+            await callback.answer(get_text("admin_error_category_not_found_short", lang), show_alert=True)
             current_page = (await state.get_data()).get("current_category_selection_page", 0)
             return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=current_page)
+        category_name = category.get("name", str(category_id))
+    except ValueError: # Handles if category_id_str is not a valid integer (e.g. "skip" or other non-numeric)
+        await callback.answer(get_text("error_invalid_category_selection", lang, default="Invalid category selected."), show_alert=True)
+        current_page = (await state.get_data()).get("current_category_selection_page", 0)
+        return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=current_page)
 
     current_product_data = (await state.get_data()).get("product_data", {})
-    current_product_data["category_id"] = category_id # Will be None if skipped
+    current_product_data["category_id"] = category_id # Must be a valid ID here
     current_product_data["category_name"] = category_name # Store name for summary
     await state.update_data(product_data=current_product_data)
 
@@ -3217,7 +3225,12 @@ async def cq_admin_prod_create_confirm_details(callback: types.CallbackQuery, st
     product_main_data = state_data.get("product_data", {})
     product_localizations = state_data.get("product_localizations_temp", [])
 
-    if not product_main_data.get("manufacturer_id") or "price" not in product_main_data or not product_localizations: # Changed "cost" to "price"
+    if (
+        not product_main_data.get("manufacturer_id") or
+        "price" not in product_main_data or
+        "category_id" not in product_main_data or # Added this check
+        not product_localizations
+    ):
         await callback.answer(get_text("admin_prod_error_incomplete_data_for_confirmation", lang), show_alert=True)
         # Send back to product menu as something went wrong
         mock_cb_for_cancel = types.CallbackQuery(id=callback.id + "_incomplete", from_user=callback.from_user, chat_instance=callback.message.chat.id, message=callback.message, data="admin_prod_add_cancel_to_menu")
@@ -3260,7 +3273,12 @@ async def cq_admin_prod_create_execute_add(callback: types.CallbackQuery, state:
     product_localizations = state_data.get("product_localizations_temp", [])
 
     # Re-check necessary data just in case
-    if not product_main_data.get("manufacturer_id") or "price" not in product_main_data or not product_localizations: # Changed "cost" to "price"
+    if (
+        not product_main_data.get("manufacturer_id") or
+        "price" not in product_main_data or
+        "category_id" not in product_main_data or # Added this check
+        not product_localizations
+    ):
         await callback.answer(get_text("admin_prod_error_incomplete_data_for_creation", lang), show_alert=True)
         await state.clear() # Clear state as it's inconsistent
         # Send back to product menu
