@@ -302,8 +302,18 @@ TEXTS: Dict[str, Dict[Optional[str], str]] = { # Allow Optional[str] for languag
 
 def get_text(key: str, language: Optional[str], default: Optional[str] = None) -> str:
     """
-    Get localized text for a given key and language.
-    Falls back to English or a provided default if the key or language is not found.
+    Retrieves the localized string for a given key and language, with fallback options.
+    
+    If the specified language or key is missing, falls back to English or a provided default.
+    If neither is available, returns the key enclosed in double brackets to indicate a missing translation.
+    
+    Args:
+        key: The identifier for the text string to retrieve.
+        language: The language code for the desired translation. Defaults to English if None.
+        default: An optional string to return if the key or translation is not found.
+    
+    Returns:
+        The localized string for the given key and language, or a fallback value if unavailable.
     """
     if language is None:
         language = "en" # Default to English if no language provided
