@@ -796,27 +796,27 @@ class ProductService:
             if not product_details:
                 logger.warning(f"Admin {admin_id} attempting to delete non-existent product ID {product_id}.")
                 return False, "admin_product_not_found", None
-                    
-                    # Try to get a good display name
-                    if product_details.get("localizations"):
-                        name_found = False
-                        for loc in product_details["localizations"]:
-                            if loc['lang_code'] == lang:
-                                product_display_name = loc['name']
-                                name_found = True
-                                break
-                        if not name_found: # Fallback to English or first localization
-                            for loc in product_details["localizations"]:
-                                if loc['lang_code'] == "en":
-                                    product_display_name = loc['name']
-                                    name_found = True
-                                    break
-                            if not name_found and product_details["localizations"]:
-                                 product_display_name = product_details["localizations"][0]['name'] # First available
-                    # Fallback to variation or ID if SKU is removed and no localizations
-                    elif product_details.get("variation"):
-                        product_display_name = product_details.get("variation")
-                    # else: product_display_name remains "ID {product_id}"
+            
+            # Try to get a good display name
+            if product_details.get("localizations"):
+                name_found = False
+                for loc in product_details["localizations"]:
+                    if loc['lang_code'] == lang:
+                        product_display_name = loc['name']
+                        name_found = True
+                        break
+                if not name_found: # Fallback to English or first localization
+                    for loc in product_details["localizations"]:
+                        if loc['lang_code'] == "en":
+                            product_display_name = loc['name']
+                            name_found = True
+                            break
+                    if not name_found and product_details["localizations"]:
+                            product_display_name = product_details["localizations"][0]['name'] # First available
+            # Fallback to variation or ID if SKU is removed and no localizations
+            elif product_details.get("variation"):
+                product_display_name = product_details.get("variation")
+            # else: product_display_name remains "ID {product_id}"
             
         except Exception as e_fetch: # Catch errors during detail fetching but still allow delete attempt
             logger.error(f"Error fetching product details for product {product_id} before deletion by admin {admin_id}: {e_fetch}", exc_info=True)
