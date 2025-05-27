@@ -83,7 +83,6 @@ class Product(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     manufacturer_id: Mapped[int] = mapped_column(Integer, ForeignKey("manufacturers.id"), nullable=False)
     category_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("categories.id"), nullable=True)
-    sku: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True)
     image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     variation: Mapped[Optional[str]] = mapped_column(String(255))
     cost: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False) # Price

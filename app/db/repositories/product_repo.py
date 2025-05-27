@@ -30,7 +30,6 @@ class ProductRepository:
         manufacturer_id: int, 
         cost: Decimal, 
         category_id: Optional[int] = None,
-        sku: Optional[str] = None, 
         image_url: Optional[str] = None, 
         variation: Optional[str] = None
     ) -> Product:
@@ -39,7 +38,6 @@ class ProductRepository:
             manufacturer_id=manufacturer_id,
             category_id=category_id,
             cost=cost,
-            sku=sku,
             image_url=image_url,
             variation=variation
         )

@@ -458,17 +458,16 @@ class ProductService:
                     manufacturer_id=product_data["manufacturer_id"],
                     category_id=product_data.get("category_id"), # Optional
                     cost=product_data["cost"],
-                    sku=product_data.get("sku"), # Optional
                     variation=product_data.get("variation"), # Optional
                     image_url=product_data.get("image_url") # Optional
                 )
 
                 if not new_product or not new_product.id: # Should not happen if create_product is robust
                     await session.rollback()
-                    logger.error(f"Admin {admin_id} - product creation failed unexpectedly after repo.create_product call for SKU {product_data.get('sku')}.")
+                    logger.error(f"Admin {admin_id} - product creation failed unexpectedly after repo.create_product call for product with manufacturer ID {product_data.get('manufacturer_id')}.")
                     return None, "admin_product_create_failed_db_error", None
                 
-                logger.info(f"Admin {admin_id} created product draft ID {new_product.id} with SKU {new_product.sku}.")
+                logger.info(f"Admin {admin_id} created product draft ID {new_product.id}.")
 
                 # Add localizations
                 if not localizations_data: # Should be caught by FSM, at least one localization needed
@@ -487,7 +486,7 @@ class ProductService:
                 logger.info(f"Admin {admin_id} added {len(localizations_data)} localizations for product ID {new_product.id}.")
 
                 await session.commit()
-                logger.info(f"Admin {admin_id} successfully created product ID {new_product.id} (SKU: {new_product.sku}) with all details.")
+                logger.info(f"Admin {admin_id} successfully created product ID {new_product.id} with all details.")
                 # Fetch the product again to ensure all relationships (like localizations) are loaded for the return object
                 # This might be redundant if create_product and add_or_update_product_localization correctly update the new_product object in-session
                 # However, to be safe and ensure the returned object is complete:
@@ -503,21 +502,19 @@ class ProductService:
                 # Assuming product_sku_key is the unique constraint name for SKU.
                 # This is highly database-dependent (PostgreSQL example).
                 # if "product_sku_key" in str(e.orig).lower() or "unique constraint" in str(e.orig).lower() and "sku" in str(e.orig).lower():
-                if "product_sku_key" in str(e.orig).lower() or (hasattr(e.orig, 'diag') and e.orig.diag.constraint_name == 'product_sku_key'):
-                    logger.warning(f"Admin {admin_id} - product creation failed due to duplicate SKU '{product_data.get('sku')}': {e}", exc_info=True)
-                    return None, "admin_product_create_failed_sku_duplicate", None
+                # Removed specific SKU check, generic IntegrityError handling below
                 
-                logger.error(f"Admin {admin_id} - product creation failed due to IntegrityError for SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                logger.error(f"Admin {admin_id} - product creation failed due to IntegrityError for product with manufacturer ID {product_data.get('manufacturer_id')}: {e}", exc_info=True)
                 return None, "admin_product_create_failed_db_error", None # Generic integrity error
 
             except SQLAlchemyError as e:
                 await session.rollback()
-                logger.error(f"Admin {admin_id} - product creation failed due to SQLAlchemyError for SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                logger.error(f"Admin {admin_id} - product creation failed due to SQLAlchemyError for product with manufacturer ID {product_data.get('manufacturer_id')}: {e}", exc_info=True)
                 return None, "admin_product_create_failed_db_error", None
 
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Admin {admin_id} - unexpected error during product creation for SKU '{product_data.get('sku')}': {e}", exc_info=True)
+                logger.error(f"Admin {admin_id} - unexpected error during product creation for product with manufacturer ID {product_data.get('manufacturer_id')}: {e}", exc_info=True)
                 return None, "admin_product_create_failed_unexpected", None
 
     async def get_products_for_admin_list(self, page: int, items_per_page: int, lang: str) -> Tuple[List[Dict[str, Any]], int]:
@@ -562,7 +559,7 @@ class ProductService:
                 formatted_products.append({
                     'id': product.id,
                     'name': display_name, # This name is now ready for display in `create_paginated_keyboard`
-                    'sku': product.sku if product.sku else get_text("not_set", lang, default="-"),
+                    # 'sku': product.sku if product.sku else get_text("not_set", lang, default="-"), # SKU removed
                     'cost': format_price(product.cost, lang) # Format price here
                 })
             
@@ -587,7 +584,7 @@ class ProductService:
             # Basic fields
             details = {
                 "id": product.id,
-                "sku": product.sku if product.sku else get_text("not_set", lang, default="-"),
+                # "sku": product.sku if product.sku else get_text("not_set", lang, default="-"), # SKU removed
                 "variation": product.variation if product.variation else get_text("not_set", lang, default="-"),
                 "cost": format_price(product.cost, lang), # Format price
                 "image_url": product.image_url, # Will be None if not set, handled by display logic
@@ -648,6 +645,9 @@ class ProductService:
                 elif field_name == "sku":
                     # SKU can be None (optional), but if provided, it's a string.
                     # Unique constraint handled by IntegrityError.
+                    # This field is being removed, so this check might become obsolete or be removed.
+                    logger.warning(f"Admin {admin_id} attempting to update SKU, which is being deprecated.")
+                    # Depending on strictness, could return an error here, or allow if DB still has column
                     pass 
                 
                 updated_product = await product_repo.update_product(product_id, **update_data)
@@ -664,10 +664,11 @@ class ProductService:
 
             except IntegrityError as e:
                 await session.rollback()
-                if "product_sku_key" in str(e.orig).lower() or \
-                   (hasattr(e.orig, 'diag') and hasattr(e.orig.diag, 'constraint_name') and e.orig.diag.constraint_name == 'product_sku_key'):
-                    logger.warning(f"Admin {admin_id} failed to update SKU for product {product_id} due to duplicate: {e}")
-                    return False, "admin_product_update_failed_sku_duplicate", field_value # Return attempted value
+                # Specific SKU duplicate check removed as SKU field is being removed.
+                # if "product_sku_key" in str(e.orig).lower() or \
+                #    (hasattr(e.orig, 'diag') and hasattr(e.orig.diag, 'constraint_name') and e.orig.diag.constraint_name == 'product_sku_key'):
+                #     logger.warning(f"Admin {admin_id} failed to update SKU for product {product_id} due to duplicate: {e}")
+                #     return False, "admin_product_update_failed_sku_duplicate", field_value # Return attempted value
                 logger.error(f"Admin {admin_id} failed to update product {product_id} field '{field_name}' due to IntegrityError: {e}", exc_info=True)
                 return False, "admin_prod_update_failed_db_error", None
             
@@ -795,25 +796,27 @@ class ProductService:
             if not product_details:
                 logger.warning(f"Admin {admin_id} attempting to delete non-existent product ID {product_id}.")
                 return False, "admin_product_not_found", None
-            
-            # Try to get a good display name
-            if product_details.get("localizations"):
-                name_found = False
-                for loc in product_details["localizations"]:
-                    if loc['lang_code'] == lang:
-                        product_display_name = loc['name']
-                        name_found = True
-                        break
-                if not name_found: # Fallback to English or first localization
-                    for loc in product_details["localizations"]:
-                        if loc['lang_code'] == "en":
-                            product_display_name = loc['name']
-                            name_found = True
-                            break
-                    if not name_found and product_details["localizations"]:
-                         product_display_name = product_details["localizations"][0]['name'] # First available
-            elif product_details.get("sku"):
-                product_display_name = product_details["sku"]
+                    
+                    # Try to get a good display name
+                    if product_details.get("localizations"):
+                        name_found = False
+                        for loc in product_details["localizations"]:
+                            if loc['lang_code'] == lang:
+                                product_display_name = loc['name']
+                                name_found = True
+                                break
+                        if not name_found: # Fallback to English or first localization
+                            for loc in product_details["localizations"]:
+                                if loc['lang_code'] == "en":
+                                    product_display_name = loc['name']
+                                    name_found = True
+                                    break
+                            if not name_found and product_details["localizations"]:
+                                 product_display_name = product_details["localizations"][0]['name'] # First available
+                    # Fallback to variation or ID if SKU is removed and no localizations
+                    elif product_details.get("variation"):
+                        product_display_name = product_details.get("variation")
+                    # else: product_display_name remains "ID {product_id}"
             
         except Exception as e_fetch: # Catch errors during detail fetching but still allow delete attempt
             logger.error(f"Error fetching product details for product {product_id} before deletion by admin {admin_id}: {e_fetch}", exc_info=True)

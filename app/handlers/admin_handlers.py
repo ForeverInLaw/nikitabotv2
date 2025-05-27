@@ -68,7 +68,6 @@ class AdminProductStates(StatesGroup):
     PRODUCT_AWAIT_MANUFACTURER_ID = State()
     PRODUCT_AWAIT_CATEGORY_ID = State()
     PRODUCT_AWAIT_COST = State()
-    PRODUCT_AWAIT_SKU = State()
     PRODUCT_AWAIT_VARIATION = State()
     PRODUCT_AWAIT_IMAGE_URL = State()
     PRODUCT_AWAIT_LOCALIZATION_LANG_CODE = State()
@@ -80,7 +79,6 @@ class AdminProductStates(StatesGroup):
 
     # Specific states for awaiting new values for each field during edit
     PRODUCT_AWAIT_NEW_COST = State()
-    PRODUCT_AWAIT_NEW_SKU = State()
     PRODUCT_AWAIT_NEW_VARIATION = State()
     PRODUCT_AWAIT_NEW_IMAGE_URL = State()
 
@@ -2268,31 +2266,6 @@ async def fsm_admin_prod_cost_received(message: types.Message, user_data: Dict[s
     current_product_data["cost"] = str(cost)
     await state.update_data(product_data=current_product_data)
 
-    await state.set_state(AdminProductStates.PRODUCT_AWAIT_SKU)
-    prompt_text = get_text("admin_prod_enter_sku", lang)
-    skip_info = get_text("admin_prod_skip_instruction_generic", lang)
-    cancel_info = get_text("cancel_prompt", lang)
-    await message.answer(f"{prompt_text}\n\n{hitalic(skip_info)}\n{hitalic(cancel_info)}", parse_mode="HTML")
-
-
-@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_SKU), F.text)
-async def fsm_admin_prod_sku_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
-    lang = user_data.get("language", "en")
-    user_service = UserService()
-    if not await is_admin_user_check(message.from_user.id, user_service):
-        return await message.answer(get_text("admin_access_denied", lang))
-
-    if message.text.lower() == "/cancel":
-        mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
-        return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
-
-    sku_input = sanitize_input(message.text)
-    sku = sku_input if sku_input != "-" else None
-
-    current_product_data = (await state.get_data()).get("product_data", {})
-    current_product_data["sku"] = sku
-    await state.update_data(product_data=current_product_data)
-
     await state.set_state(AdminProductStates.PRODUCT_AWAIT_VARIATION)
     prompt_text = get_text("admin_prod_enter_variation", lang)
     skip_info = get_text("admin_prod_skip_instruction_generic", lang)
@@ -3137,7 +3110,6 @@ def _format_product_details_for_admin_view(details: Dict[str, Any], lang: str) -
     view_text = get_text("admin_product_view_title", lang, product_name=hbold(primary_name)) + "\n\n"
     
     view_text += f"{hbold(get_text('admin_prod_detail_id', lang))}: {hcode(details['id'])}\n"
-    view_text += f"{hbold(get_text('admin_prod_detail_sku', lang))}: {hcode(details['sku'])}\n"
     view_text += f"{hbold(get_text('admin_prod_detail_manufacturer', lang))}: {hcode(details['manufacturer_name'])}\n"
     view_text += f"{hbold(get_text('admin_prod_detail_category', lang))}: {hcode(details['category_name'])}\n"
     view_text += f"{hbold(get_text('admin_prod_detail_cost', lang))}: {details['cost']}\n" # Already formatted by service
@@ -3218,7 +3190,6 @@ def _format_product_confirmation_details(product_data: Dict[str, Any], localizat
     details_text += f"{hbold(get_text('product_field_name_manufacturer_id', lang))}: {product_data.get('manufacturer_name', product_data.get('manufacturer_id', get_text('not_set', lang)))}\n"
     details_text += f"{hbold(get_text('product_field_name_category_id', lang))}: {product_data.get('category_name', product_data.get('category_id', get_text('not_set', lang)))}\n"
     details_text += f"{hbold(get_text('product_field_name_cost', lang))}: {format_price(product_data.get('cost', 0), lang)}\n" # Assuming format_price can handle Decimal
-    details_text += f"{hbold(get_text('product_field_name_sku', lang))}: {hcode(product_data.get('sku')) if product_data.get('sku') else get_text('not_set', lang)}\n"
     details_text += f"{hbold(get_text('product_field_name_variation', lang))}: {hcode(product_data.get('variation')) if product_data.get('variation') else get_text('not_set', lang)}\n"
     details_text += f"{hbold(get_text('product_field_name_image_url', lang))}: {hlink('Link', product_data['image_url']) if product_data.get('image_url') else get_text('not_set', lang)}\n"
     
@@ -3307,20 +3278,19 @@ async def cq_admin_prod_create_execute_add(callback: types.CallbackQuery, state:
 
     if created_product and product_id:
         # Get one of the names for the success message, preferably in admin's language or English
-        product_display_name = product_main_data.get("sku", str(product_id)) # Fallback to SKU or ID
+        product_display_name = product_main_data.get("variation", str(product_id)) # Fallback to variation or ID
         for loc in product_localizations:
             if loc['language_code'] == lang:
                 product_display_name = loc['name']
                 break
-            if loc['language_code'] == 'en' and product_display_name == product_main_data.get("sku", str(product_id)): # Prefer English over SKU if admin lang not found
+            if loc['language_code'] == 'en' and product_display_name == product_main_data.get("variation", str(product_id)): # Prefer English over variation if admin lang not found
                  product_display_name = loc['name']
         
         final_message = get_text(message_key, lang, product_name=hcode(product_display_name), product_id=product_id)
         await callback.answer(final_message, show_alert=True) # Show as alert for more visibility
     else:
-        # Construct error message if specific details are available (e.g. SKU for duplicate error)
-        error_sku = product_main_data.get('sku', 'N/A')
-        final_message = get_text(message_key, lang, sku=hcode(error_sku))
+        # Construct error message if specific details are available
+        final_message = get_text(message_key, lang)
         await callback.answer(final_message, show_alert=True)
 
 
