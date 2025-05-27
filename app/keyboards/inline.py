@@ -418,7 +418,6 @@ def create_admin_product_edit_options_keyboard(product_id: int, language: str, p
     builder.row(InlineKeyboardButton(text=get_text("product_field_name_manufacturer_id", language), callback_data=f"admin_prod_edit_field:{product_id}:manufacturer_id"))
     builder.row(InlineKeyboardButton(text=get_text("product_field_name_category_id", language), callback_data=f"admin_prod_edit_field:{product_id}:category_id"))
     builder.row(InlineKeyboardButton(text=get_text("product_field_name_cost", language), callback_data=f"admin_prod_edit_field:{product_id}:cost"))
-    builder.row(InlineKeyboardButton(text=get_text("product_field_name_sku", language), callback_data=f"admin_prod_edit_field:{product_id}:sku"))
     builder.row(InlineKeyboardButton(text=get_text("product_field_name_variation", language), callback_data=f"admin_prod_edit_field:{product_id}:variation"))
     builder.row(InlineKeyboardButton(text=get_text("product_field_name_image_url", language), callback_data=f"admin_prod_edit_field:{product_id}:image_url"))
     builder.row(InlineKeyboardButton(text=get_text("product_field_name_localizations", language), callback_data=f"admin_prod_edit_locs_menu:{product_id}"))
