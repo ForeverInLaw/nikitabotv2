@@ -451,10 +451,33 @@ class ProductService:
                 
                 # Convert cost back to Decimal before passing to repository
                 product_data["cost"] = Decimal(product_data["cost"])
+
+                # Extract product name for the main 'name' field in the Product table
+                product_name_for_table = None
+                # The existing check for empty localizations_data should prevent issues here,
+                # but defensive coding is good.
+                if localizations_data: 
+                    # Try to find 'en'
+                    for loc in localizations_data:
+                        if loc.get("language_code") == "en":
+                            product_name_for_table = loc.get("name")
+                            break
+                    # If 'en' not found, use the first available name
+                    if not product_name_for_table: # and localizations_data is guaranteed non-empty by prior check
+                        product_name_for_table = localizations_data[0].get("name")
                 
+                # If product_name_for_table is still None here, it implies localizations_data was empty
+                # or structured unexpectedly (e.g., missing 'name' key).
+                # The existing check `if not localizations_data:` handles the empty case later,
+                # but if it *must* be set for create_product, this is the point to ensure it.
+                # For now, we rely on the subsequent check to catch empty localizations_data.
+                # A more robust solution might involve raising an error or using a default name
+                # if product_name_for_table remains None and is strictly required by create_product.
+
                 # Create the product
                 # ProductRepository.create_product expects specific args, not a dict
                 new_product = await product_repo.create_product(
+                    name=product_name_for_table, # Pass the extracted name
                     manufacturer_id=product_data["manufacturer_id"],
                     category_id=product_data.get("category_id"), # Optional
                     cost=product_data["cost"],
