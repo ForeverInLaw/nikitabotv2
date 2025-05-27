@@ -30,24 +30,26 @@ class OrderStatusEnum(Enum):
         return [status.value for status in cls]
 
 
-def format_price(amount: Union[Decimal, float, int], currency: str = "$") -> str:
+def format_price(amount: Union[Decimal, float, int, str], currency: str = "$") -> str: # Added str to Union
     """Format price for display."""
     try:
-        if isinstance(amount, (int, float)):
-            amount = Decimal(str(amount))
+        if isinstance(amount, str): # Check if amount is a string
+            amount = Decimal(amount) # Convert string to Decimal
+        elif isinstance(amount, (int, float)): # Else, if it's int or float
+            amount = Decimal(str(amount)) # Convert to Decimal as before
         
-        # Format to 2 decimal places
+        # At this point, amount should be a Decimal object
         formatted = f"{amount:.2f}"
         
-        # Remove unnecessary trailing zeros
         if '.' in formatted:
             formatted = formatted.rstrip('0').rstrip('.')
         
         return f"{currency}{formatted}"
         
     except Exception as e:
-        logger.error(f"Error formatting price {amount}: {e}")
-        return f"{currency}0.00"
+        # Log the original amount type for better debugging
+        logger.error(f"Error formatting price '{amount}' (type: {type(amount)}): {e}")
+        return f"{currency}0.00" # Default fallback
 
 
 def format_datetime(dt: datetime, language: str = "en") -> str:
