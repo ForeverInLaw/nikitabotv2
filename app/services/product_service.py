@@ -207,8 +207,17 @@ class ProductService:
 
     async def release_stock(self, product_id: int, location_id: int, quantity: int) -> bool:
         """
-        Release reserved stock (increase available stock).
-        Used when orders are cancelled or rejected.
+        Releases reserved stock for a product at a specified location.
+        
+        Increases the available stock by the given quantity, typically used when orders are canceled or rejected.
+        
+        Args:
+            product_id: The ID of the product to update.
+            location_id: The ID of the location where stock is released.
+            quantity: The number of units to add back to available stock.
+        
+        Returns:
+            True if the stock was successfully released, False otherwise.
         """
         try:
             async with get_session() as session:
@@ -229,6 +238,11 @@ class ProductService:
             return False
 
     async def list_all_products_paginated(self, language: str, limit: int, offset: int) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Retrieves a paginated list of products with localized names and pricing information.
+        
+        Each product includes its ID, localized name (with fallback if unavailable), SKU, formatted price for display, and raw price. Returns the list of products and the total count. If an error occurs, returns an empty list and zero.
+        """
         try:
             async with get_session() as session:
                 product_repo = ProductRepository(session)
@@ -263,6 +277,12 @@ class ProductService:
             return [], 0
 
     async def list_all_categories_paginated(self, language: str, limit: int, offset: int) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Retrieves a paginated list of categories with their IDs and names.
+        
+        Returns:
+            A tuple containing a list of category dictionaries and the total count.
+        """
         try:
             async with get_session() as session:
                 product_repo = ProductRepository(session)
@@ -278,6 +298,12 @@ class ProductService:
             return [], 0
 
     async def list_all_manufacturers_paginated(self, language: str, limit: int, offset: int) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Retrieves a paginated list of manufacturers.
+        
+        Returns:
+            A tuple containing a list of manufacturer dictionaries with IDs and names, and the total count of manufacturers. Returns an empty list and zero count if an error occurs.
+        """
         try:
             async with get_session() as session:
                 product_repo = ProductRepository(session)
@@ -289,6 +315,12 @@ class ProductService:
             return [], 0
 
     async def list_all_locations_paginated(self, language: str, limit: int, offset: int) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        Retrieves a paginated list of locations with their IDs, names, and addresses.
+        
+        Returns:
+            A tuple containing a list of location dictionaries and the total count of locations.
+        """
         try:
             async with get_session() as session:
                 product_repo = ProductRepository(session)
@@ -304,6 +336,11 @@ class ProductService:
 
     async def get_locations_for_product_stock_admin(self, product_id: int, language: str, limit: int, offset: int) -> Tuple[List[Dict[str, Any]], int]:
         # For now, this lists all locations. It could be enhanced to show current stock per location for the product.
+        """
+        Retrieves a paginated list of all locations for product stock administration.
+        
+        Returns a list of dictionaries containing location IDs, names, and addresses, along with the total count of locations. Currently, the product ID is not used for filtering but is included for future extensibility. Returns an empty list and zero count on error.
+        """
         try:
             async with get_session() as session:
                 product_repo = ProductRepository(session)
@@ -321,6 +358,22 @@ class ProductService:
 
     async def update_stock_by_admin(self, product_id: int, location_id: int, quantity_change: int, admin_id: int, language: str) -> Tuple[bool, str, Optional[int]]:
         # quantity_change is the amount to add (positive) or subtract (negative)
+        """
+        Updates the stock quantity for a product at a specific location by an admin, ensuring the resulting stock is not negative.
+        
+        Args:
+            product_id: The ID of the product to update.
+            location_id: The ID of the location where the stock is updated.
+            quantity_change: The amount to add (positive) or subtract (negative) from the current stock.
+            admin_id: The ID of the admin performing the update.
+            language: The language code for localization (not used in this method but included for interface consistency).
+        
+        Returns:
+            A tuple containing:
+                - A boolean indicating success or failure.
+                - A message key describing the result.
+                - The new stock quantity if successful, the current quantity if the update would result in negative stock, or None if a database error occurred.
+        """
         try:
             async with get_session() as session:
                 product_repo = ProductRepository(session)

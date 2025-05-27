@@ -953,6 +953,11 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
 # --- Product Management Menu ---
 @router.callback_query(F.data == "admin_products_menu")
 async def cq_admin_products_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays the admin product management menu after verifying admin access.
+    
+    Clears any active FSM state and presents the product management options to the admin user.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -968,6 +973,11 @@ async def cq_admin_products_menu(callback: types.CallbackQuery, user_data: Dict[
 # --- Category Management Menu ---
 @router.callback_query(F.data == "admin_categories_menu")
 async def cq_admin_categories_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays the admin category management menu after verifying admin access.
+    
+    Clears any existing FSM state and presents the category management options to the admin user.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -983,6 +993,11 @@ async def cq_admin_categories_menu(callback: types.CallbackQuery, user_data: Dic
 # --- Manufacturer Management Menu ---
 @router.callback_query(F.data == "admin_manufacturers_menu")
 async def cq_admin_manufacturers_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays the manufacturer management menu in the admin panel after verifying admin access.
+    
+    Clears any existing FSM state and presents the manufacturer management options to the admin user.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -998,6 +1013,11 @@ async def cq_admin_manufacturers_menu(callback: types.CallbackQuery, user_data: 
 # --- Location Management Menu ---
 @router.callback_query(F.data == "admin_locations_menu")
 async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays the admin location management menu after verifying admin access.
+    
+    Clears any active FSM state and presents the location management options to the admin user.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1013,6 +1033,11 @@ async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict
 # --- Stock Management Menu ---
 @router.callback_query(F.data == "admin_stock_menu")
 async def cq_admin_stock_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays the stock management menu in the admin panel after verifying admin access.
+    
+    Clears any existing FSM state and presents the stock management options to the admin user.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1033,6 +1058,11 @@ async def cq_admin_stock_menu(callback: types.CallbackQuery, user_data: Dict[str
 # --- Product List Handlers ---
 @router.callback_query(F.data.startswith("admin_prod_list"))
 async def cq_admin_list_products(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of products in the admin panel.
+    
+    If no products are found on the first page, shows an empty list message with a back button. Only accessible to admin users.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1074,6 +1104,11 @@ async def cq_admin_list_products(callback: types.CallbackQuery, user_data: Dict[
 
 @router.callback_query(F.data.startswith("admin_view_prod:"))
 async def cq_admin_view_product_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    """
+    Displays a "not implemented" alert when attempting to view a product from the admin panel.
+    
+    This handler informs the admin that viewing individual product details is not yet available.
+    """
     lang = user_data.get("language", "en")
     # item_id = callback.data.split(":")[1] # If needed for a more specific message
     await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
@@ -1082,6 +1117,11 @@ async def cq_admin_view_product_noop(callback: types.CallbackQuery, user_data: D
 # --- Category List Handlers ---
 @router.callback_query(F.data.startswith("admin_cat_list"))
 async def cq_admin_list_categories(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of product categories in the admin panel.
+    
+    If no categories are found on the first page, shows an empty list message with a back button. Otherwise, presents the current page of categories with pagination controls and back navigation. Only accessible to admin users.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1123,6 +1163,9 @@ async def cq_admin_list_categories(callback: types.CallbackQuery, user_data: Dic
 
 @router.callback_query(F.data.startswith("admin_view_cat:"))
 async def cq_admin_view_category_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    """
+    Displays a "not implemented" alert when attempting to view a category in the admin panel.
+    """
     lang = user_data.get("language", "en")
     await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
 
@@ -1133,6 +1176,11 @@ async def cq_admin_view_category_noop(callback: types.CallbackQuery, user_data: 
 # The callback "admin_stock_select_prod:0" is set on the "Update Stock" button in create_admin_stock_management_menu_keyboard
 @router.callback_query(F.data.startswith("admin_stock_select_prod:"))
 async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of products for the admin to select when updating stock.
+    
+    If no products are found, shows an empty list message with a back button. On valid selection, updates FSM state and stores the current page for navigation in the stock update workflow.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1189,6 +1237,11 @@ async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data
     F.data.startswith(("admin_stock_prod_sel:", "admin_stock_loc_list_pg:"))
 )
 async def cq_admin_stock_display_locations_for_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of locations for a selected product during the admin stock update workflow.
+    
+    If the product is not found, returns to the product selection menu. Handles both initial entry from product selection and pagination navigation, updating FSM state for back navigation and context preservation.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService() # For admin check
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1273,6 +1326,11 @@ async def cq_admin_stock_display_locations_for_product(callback: types.CallbackQ
 # Callback: "admin_stock_loc_sel:PRODUCT_ID:LOCATION_ID:LOCATION_LIST_PAGE"
 @router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_sel:"))
 async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Prompts the admin to enter a new stock quantity for a selected product at a specific location.
+    
+    If the location is not found, returns to the location selection list. Displays the current stock quantity and provides a back button for navigation. Updates FSM state and context for the stock update workflow.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1332,6 +1390,11 @@ async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_d
 # Step 4: Quantity Received, Update Stock
 @router.message(StateFilter(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE), F.text)
 async def fsm_admin_stock_quantity_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Processes the admin's input for updating product stock quantity at a specific location.
+    
+    Validates the entered quantity, updates the stock if valid, and provides feedback. On invalid input, re-prompts with an error and allows returning to location selection. After a successful or failed update, clears the FSM state and returns to the stock management menu.
+    """
     lang = user_data.get("language", "en")
     user_service_check = UserService()
     if not await is_admin_user_check(message.from_user.id, user_service_check):
@@ -1413,6 +1476,11 @@ async def fsm_admin_stock_quantity_received(message: types.Message, user_data: D
 # The callback "admin_stock_select_prod:0" is set on the "Update Stock" button in create_admin_stock_management_menu_keyboard
 @router.callback_query(F.data.startswith("admin_stock_select_prod:"))
 async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of products for the admin to select when updating stock.
+    
+    If no products are found, shows an appropriate message with a back button. Updates the FSM state to track the current page in the stock selection workflow.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1464,6 +1532,11 @@ async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data
 # It will generate callbacks like "admin_stock_prod_sel:PRODUCT_ID:PRODUCT_LIST_PAGE"
 @router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_PRODUCT), F.data.startswith("admin_stock_prod_sel:"))
 async def cq_admin_stock_product_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Handles the selection of a product for stock update and displays a paginated list of locations for that product.
+    
+    If the product is not found, notifies the admin and returns to the product selection menu. Otherwise, presents available locations for the selected product, enabling the admin to proceed with stock updates or navigate back to the product list.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService() # For admin check
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1536,6 +1609,11 @@ async def cq_admin_stock_product_selected(callback: types.CallbackQuery, user_da
 # Handler for Location List Pagination (distinct from initial product selection)
 @router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_list_pg:"))
 async def cq_admin_stock_location_list_paginate(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Handles pagination for the location selection step during stock updates in the admin panel.
+    
+    Fetches and displays a paginated list of locations for a selected product, updating the inline keyboard for navigation. Only accessible to admin users.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService() # For admin check
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1581,6 +1659,11 @@ async def cq_admin_stock_location_list_paginate(callback: types.CallbackQuery, u
 # It will generate callbacks like "admin_stock_loc_sel:PRODUCT_ID:LOCATION_ID:LOCATION_LIST_PAGE"
 @router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_sel:"))
 async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Prompts the admin to enter a new stock quantity for a selected product at a specific location.
+    
+    If the location is not found, returns to the location selection list. Displays the current quantity and provides a back button to return to the location list for the selected product.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService() # For admin check
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1641,6 +1724,11 @@ async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_d
 # Step 4: Quantity Received, Update Stock
 @router.message(StateFilter(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE), F.text)
 async def fsm_admin_stock_quantity_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Processes the admin's input for updating product stock quantity at a specific location.
+    
+    Validates the entered quantity, updates the stock if valid, and provides feedback. On invalid input, re-prompts for a correct quantity with context-aware navigation. Handles missing context by returning to the admin panel. After a successful or failed update, clears the FSM state and returns to the stock management menu.
+    """
     lang = user_data.get("language", "en")
     # Admin check not strictly needed here if FSM entry is protected, but good practice
     user_service_check = UserService()
@@ -1729,6 +1817,11 @@ async def fsm_admin_stock_quantity_received(message: types.Message, user_data: D
 # Step 1: Select Product for Stock Update (Entry point from Stock Menu)
 @router.callback_query(F.data.startswith("admin_stock_select_prod:"))
 async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of products for the admin to select when updating stock.
+    
+    If no products are found on the first page, shows an empty state with a back button. Upon selection, updates the FSM state and stores the current page for navigation.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1773,6 +1866,11 @@ async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data
 # Step 2: Product Selected, Select Location
 @router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_PRODUCT), F.data.startswith("admin_stock_prod_selected:"))
 async def cq_admin_stock_product_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Handles selection of a product for stock update and displays a paginated list of locations for that product.
+    
+    If the product is not found, notifies the admin and returns to the product selection menu. Otherwise, fetches and displays locations where the selected product is stocked, with pagination and a back button to the product list. Updates FSM state and context for the stock update workflow.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1855,6 +1953,11 @@ async def cq_admin_stock_product_selected(callback: types.CallbackQuery, user_da
 # Step 3: Location Selected, Prompt for Quantity
 @router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_selected:"))
 async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Prompts the admin to enter a new stock quantity for a selected product at a specific location.
+    
+    If the location is not found, returns to the location selection list for the chosen product. Displays the current stock quantity and provides a back button to the location list. Updates FSM state with relevant context for the stock update workflow.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1932,6 +2035,11 @@ async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_d
 # Step 4: Quantity Received, Update Stock
 @router.message(StateFilter(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE), F.text)
 async def fsm_admin_stock_quantity_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Processes the admin's input for updating product stock quantity at a specific location.
+    
+    Validates the entered quantity, updates the stock if valid, and provides feedback. On invalid input, re-prompts for a correct quantity. Handles missing context by returning to the admin panel. After a successful or failed update, clears the FSM state and returns to the stock management menu.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(message.from_user.id, user_service):
@@ -2012,6 +2120,11 @@ async def fsm_admin_stock_quantity_received(message: types.Message, user_data: D
 # --- Manufacturer List Handlers ---
 @router.callback_query(F.data.startswith("admin_mfg_list"))
 async def cq_admin_list_manufacturers(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of manufacturers in the admin panel.
+    
+    If no manufacturers are found on the first page, shows an empty list message with a back button. Otherwise, presents a paginated inline keyboard for navigating manufacturers. Only accessible to admin users.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -2053,6 +2166,9 @@ async def cq_admin_list_manufacturers(callback: types.CallbackQuery, user_data: 
 
 @router.callback_query(F.data.startswith("admin_view_mfg:"))
 async def cq_admin_view_manufacturer_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    """
+    Displays a "not implemented" alert when attempting to view manufacturer details in the admin panel.
+    """
     lang = user_data.get("language", "en")
     await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
 
@@ -2060,6 +2176,11 @@ async def cq_admin_view_manufacturer_noop(callback: types.CallbackQuery, user_da
 # --- Location List Handlers ---
 @router.callback_query(F.data.startswith("admin_loc_list"))
 async def cq_admin_list_locations(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    """
+    Displays a paginated list of all locations in the admin panel.
+    
+    If no locations are found on the first page, shows an empty state message with a back button. Only accessible to admin users.
+    """
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -2101,5 +2222,10 @@ async def cq_admin_list_locations(callback: types.CallbackQuery, user_data: Dict
 
 @router.callback_query(F.data.startswith("admin_view_loc:"))
 async def cq_admin_view_location_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    """
+    Responds to a request to view location details with a "not implemented" alert.
+    
+    Displays an alert indicating that viewing individual location details is not yet supported.
+    """
     lang = user_data.get("language", "en")
     await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
