@@ -77,7 +77,7 @@ class ProductService:
                         "id": product.id,
                         "name": name,
                         "variation": product.variation,
-                        "price": product.cost
+                        "price": product.price # Changed from product.cost
                     })
                 
                 return formatted_products
@@ -116,7 +116,7 @@ class ProductService:
                     "id": product.id,
                     "name": name,
                     "description": description,
-                    "price": product.cost,
+                    "price": product.price, # Changed from product.cost
                     "stock": stock_quantity,
                     "variation": product.variation,
                     "image_url": product.image_url
@@ -449,8 +449,9 @@ class ProductService:
                         logger.warning(f"Admin {admin_id} attempting to create product with non-existent category ID {category_id}.")
                         return None, "admin_error_category_not_found", None
                 
-                # Convert cost back to Decimal before passing to repository
-                product_data["cost"] = Decimal(product_data["cost"])
+                # Convert price back to Decimal before passing to repository
+                # Assuming product_data comes in with "price" key from the caller FSM/handler
+                product_data["price"] = Decimal(product_data["price"]) # Changed from "cost"
 
                 # Extract product name for the main 'name' field in the Product table
                 product_name_for_table = None
@@ -480,7 +481,7 @@ class ProductService:
                     name=product_name_for_table, # Pass the extracted name
                     manufacturer_id=product_data["manufacturer_id"],
                     category_id=product_data.get("category_id"), # Optional
-                    cost=product_data["cost"],
+                    price=product_data["price"], # Changed from cost=product_data["cost"]
                     variation=product_data.get("variation"), # Optional
                     image_url=product_data.get("image_url") # Optional
                 )
@@ -583,7 +584,7 @@ class ProductService:
                     'id': product.id,
                     'name': display_name, # This name is now ready for display in `create_paginated_keyboard`
                     # 'sku': product.sku if product.sku else get_text("not_set", lang, default="-"), # SKU removed
-                    'cost': format_price(product.cost, lang) # Format price here
+                    'price': format_price(product.price, lang) # Changed from cost to price
                 })
             
             return formatted_products, total_count
@@ -609,7 +610,7 @@ class ProductService:
                 "id": product.id,
                 # "sku": product.sku if product.sku else get_text("not_set", lang, default="-"), # SKU removed
                 "variation": product.variation if product.variation else get_text("not_set", lang, default="-"),
-                "cost": format_price(product.cost, lang), # Format price
+                "price": format_price(product.price, lang), # Changed from cost to price
                 "image_url": product.image_url, # Will be None if not set, handled by display logic
                 "manufacturer_name": product.manufacturer.name if product.manufacturer else get_text("not_assigned", lang, default="N/A"),
                 "category_name": product.category.name if product.category else get_text("not_assigned", lang, default="N/A"),
@@ -662,9 +663,9 @@ class ProductService:
                 update_data = {field_name: field_value}
 
                 # Specific validation for certain fields
-                if field_name == "cost":
+                if field_name == "price": # Changed from "cost"
                     if not isinstance(field_value, Decimal) or field_value <= 0:
-                        return False, "admin_prod_invalid_cost_format", None
+                        return False, "admin_prod_invalid_price_format", None # Changed message key
                 elif field_name == "sku":
                     # SKU can be None (optional), but if provided, it's a string.
                     # Unique constraint handled by IntegrityError.

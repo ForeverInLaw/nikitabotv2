@@ -29,7 +29,7 @@ class ProductRepository:
         self,
         name: str,
         manufacturer_id: int,
-        cost: Decimal,
+        price: Decimal,
         category_id: Optional[int] = None,
         image_url: Optional[str] = None,
         variation: Optional[str] = None
@@ -39,7 +39,7 @@ class ProductRepository:
             name=name,
             manufacturer_id=manufacturer_id,
             category_id=category_id,
-            cost=cost,
+            price=price,
             image_url=image_url,
             variation=variation
         )

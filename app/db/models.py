@@ -86,7 +86,7 @@ class Product(Base):
     category_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("categories.id"), nullable=True)
     image_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     variation: Mapped[Optional[str]] = mapped_column(String(255))
-    cost: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False) # Price
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False) # Price
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
