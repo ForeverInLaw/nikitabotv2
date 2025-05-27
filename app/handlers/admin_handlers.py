@@ -2448,7 +2448,7 @@ async def cq_admin_prod_create_select_loc_lang(callback: types.CallbackQuery, st
     if not await is_admin_user_check(callback.from_user.id, user_service):
         return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
 
-    selected_loc_lang = callback.data.split(":")[1]
+    selected_loc_lang = callback.data.split(":")[2]
     
     # Validate selected_loc_lang (e.g. ensure it's in supported languages) - though keyboard should only show valid ones
     from app.localization.locales import TEXTS as ALL_LANG_TEXTS
