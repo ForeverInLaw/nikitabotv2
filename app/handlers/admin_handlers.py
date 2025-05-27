@@ -75,8 +75,25 @@ class AdminProductStates(StatesGroup):
     PRODUCT_AWAIT_LOCALIZATION_NAME = State()     
     PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION = State()
     PRODUCT_CONFIRM_ADD = State()
-    PRODUCT_AWAIT_EDIT_FIELD_VALUE = State()
-    PRODUCT_SELECT_ENTITY_FOR_FIELD = State() 
+    PRODUCT_AWAIT_EDIT_FIELD_VALUE = State() # State when edit options are shown
+    PRODUCT_SELECT_ENTITY_FOR_FIELD = State() # State for selecting Manufacturer/Category during edit
+
+    # Specific states for awaiting new values for each field during edit
+    PRODUCT_AWAIT_NEW_COST = State()
+    PRODUCT_AWAIT_NEW_SKU = State()
+    PRODUCT_AWAIT_NEW_VARIATION = State()
+    PRODUCT_AWAIT_NEW_IMAGE_URL = State()
+
+    # States for managing localizations of an existing product
+    PRODUCT_MANAGE_LOCALIZATIONS = State() # When localization action keyboard is shown
+    PRODUCT_SELECT_NEW_LOCALIZATION_LANG = State() # When choosing a language to add a new localization for an existing product
+    # PRODUCT_AWAIT_LOCALIZATION_NAME and PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION are re-used
+
+    # States for managing localizations of an existing product
+    PRODUCT_MANAGE_LOCALIZATIONS = State() # When localization action keyboard is shown
+    PRODUCT_SELECT_NEW_LOCALIZATION_LANG = State() # When choosing a language to add a new localization for an existing product
+    # PRODUCT_AWAIT_LOCALIZATION_NAME and PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION are re-used
+    PRODUCT_CONFIRM_DELETE = State() # For confirming product deletion
 
     CATEGORY_AWAIT_NAME = State()
     CATEGORY_AWAIT_EDIT_NAME = State() 
@@ -84,10 +101,11 @@ class AdminProductStates(StatesGroup):
     CATEGORY_SELECT_FOR_DELETE = State()
 
     MANUFACTURER_AWAIT_NAME = State()
-    MANUFACTURER_AWAIT_EDIT_NAME = State() 
+    MANUFACTURER_AWAIT_EDIT_NAME = State()
     MANUFACTURER_SELECT_FOR_EDIT = State()
     MANUFACTURER_SELECT_FOR_DELETE = State()
     MANUFACTURER_CONFIRM_DELETE = State() # New state
+    # MANUFACTURER_AWAIT_NEW_NAME = State() # Covered by MANUFACTURER_AWAIT_EDIT_NAME
 
     LOCATION_AWAIT_NAME = State()
     LOCATION_AWAIT_ADDRESS = State()
@@ -125,6 +143,108 @@ class AdminSettingsStates(StatesGroup):
 class AdminStatisticsStates(StatesGroup):
     VIEWING_STATS_MENU = State()
     # VIEWING_USER_STATS = State() # Future: For specific stats views
+
+
+# --- Helper for paginated entity selection for Product Creation ---
+async def _send_paginated_entities_for_selection(
+    event: Union[types.Message, types.CallbackQuery],
+    state: FSMContext,
+    user_data: Dict[str, Any],
+    entity_type: str, # "manufacturer" or "category"
+    page: int = 0,
+    # Allow overriding some create_paginated_keyboard parameters for flexibility (used in product edit)
+    item_callback_prefix_override: Optional[str] = None,
+    base_pagination_cb_override: Optional[str] = None, 
+    back_callback_key_override: Optional[str] = None,
+    back_callback_data_override: Optional[str] = None,
+    additional_buttons_override: Optional[List[List[InlineKeyboardButton]]] = None
+):
+    lang = user_data.get("language", "en")
+    product_service = ProductService() # Using ProductService to fetch entities
+    user_service = UserService()
+
+    if not await is_admin_user_check(event.from_user.id, user_service):
+        msg = get_text("admin_access_denied", lang)
+        if isinstance(event, types.CallbackQuery): await event.answer(msg, show_alert=True)
+        else: await event.answer(msg)
+        return
+
+    entities_on_page_data, total_entities = await product_service.get_all_entities_paginated(
+        entity_type=entity_type,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        language=lang
+    )
+
+    title_key = f"admin_prod_enter_{entity_type}_id" # e.g., admin_prod_enter_manufacturer_id
+    title = get_text(title_key, lang)
+    
+    # Add instruction about skipping category selection
+    if entity_type == "category":
+        title += "\n\n" + hitalic(get_text("admin_prod_category_skip_instruction", lang))
+
+
+    if not entities_on_page_data and page == 0 and entity_type == "manufacturer": # Manufacturer is mandatory
+        empty_text = title + "\n\n" + get_text(f"admin_no_{entity_type}s_found_for_product_creation", lang, entity=entity_type)
+        # Back to product management menu if no manufacturers to select
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_management", lang, "admin_products_menu")).as_markup()
+        
+        target_message = event.message if isinstance(event, types.CallbackQuery) else event
+        if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+             await target_message.edit_text(empty_text, reply_markup=kb)
+        else:
+             await target_message.answer(empty_text, reply_markup=kb)
+        if isinstance(event, types.CallbackQuery): await event.answer()
+        return
+    
+    # For categories, if none are found, it's fine, user can skip.
+    # The keyboard will show a "Skip" button in this case if entity_type is category.
+
+    current_fsm_state = AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID
+    item_callback_prefix = item_callback_prefix_override or ("admin_prod_create_select_manufacturer" if entity_type == "manufacturer" else "admin_prod_create_select_category")
+    base_pagination_cb = base_pagination_cb_override or ("admin_prod_create_page_manufacturer" if entity_type == "manufacturer" else "admin_prod_create_page_category")
+    
+    current_fsm_state_for_selection = AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID # Default for create
+    if "admin_prod_create" in item_callback_prefix: # Explicitly check if it's for creation flow
+        if entity_type == "category":
+            current_fsm_state_for_selection = AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID
+    elif "admin_prod_edit" in item_callback_prefix: # Explicitly check if it's for edit flow
+        current_fsm_state_for_selection = AdminProductStates.PRODUCT_SELECT_ENTITY_FOR_FIELD
+    # else: log warning or default, for now this covers the known cases
+
+    await state.set_state(current_fsm_state_for_selection)
+    await state.update_data({f"current_{entity_type}_selection_page": page}) 
+
+    final_additional_buttons = additional_buttons_override
+    # Default skip button for category creation if no override is provided
+    if entity_type == "category" and "create" in item_callback_prefix and additional_buttons_override is None:
+        final_additional_buttons = [[InlineKeyboardButton(text=get_text("skip", lang), callback_data=f"{item_callback_prefix}:skip")]]
+    # For category edit, additional_buttons_override will be used if provided (e.g. "Skip and Remove")
+
+
+    keyboard = create_paginated_keyboard(
+        items=entities_on_page_data, 
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data=base_pagination_cb, 
+        item_callback_prefix=item_callback_prefix, 
+        language=lang,
+        back_callback_key=back_callback_key_override or "cancel_add_product", 
+        back_callback_data=back_callback_data_override or "admin_prod_add_cancel_to_menu",
+        total_items_override=total_entities,
+        item_text_key="name",
+        item_id_key="id",
+        additional_buttons=final_additional_buttons
+    )
+    
+    target_message = event.message if isinstance(event, types.CallbackQuery) else event
+    if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+        await target_message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        # Remove reply keyboard if any previous message handler left one
+        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        
+    if isinstance(event, types.CallbackQuery): await event.answer()
 
 
 def format_admin_order_details(order_data: Dict[str, Any], lang: str) -> str:
@@ -1188,9 +1308,25 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
                 target_message_text = get_text("admin_manufacturer_management_title", lang) # Assuming this key exists
                 target_reply_markup = create_admin_manufacturer_management_menu_keyboard(lang)
             else: # Default for other product states (e.g. product, category)
-                 target_message_text = get_text("admin_product_management_title", lang) 
-                 target_reply_markup = create_admin_product_management_menu_keyboard(lang) 
-        
+                 target_message_text = get_text("admin_product_management_title", lang)
+                 target_reply_markup = create_admin_product_management_menu_keyboard(lang)
+            # Add specific handling for product creation states if universal cancel is used
+            elif current_fsm_state_obj in [
+                AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID,
+                AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID,
+                AdminProductStates.PRODUCT_AWAIT_COST,
+                AdminProductStates.PRODUCT_AWAIT_SKU,
+                AdminProductStates.PRODUCT_AWAIT_VARIATION,
+                AdminProductStates.PRODUCT_AWAIT_IMAGE_URL,
+                AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE,
+                AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME,
+                AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION,
+                AdminProductStates.PRODUCT_CONFIRM_ADD
+            ]:
+                # If cancelling during product creation, go to product management menu
+                target_message_text = get_text("admin_product_management_title", lang)
+                target_reply_markup = create_admin_product_management_menu_keyboard(lang)
+
         elif current_fsm_state_obj.startswith("AdminSettingsStates:"):
              target_message_text = get_text("admin_settings_title", lang)
              target_reply_markup = InlineKeyboardBuilder().row(create_back_button("back_to_admin_main_menu", lang, "admin_panel_main")).as_markup() # Simple back for now
@@ -1360,6 +1496,209 @@ async def cq_admin_execute_delete_manufacturer(callback: types.CallbackQuery, st
     await _send_paginated_manufacturers_for_delete(callback, state, user_data, page=0)
 
 
+# --- Manufacturer Edit Handlers ---
+
+async def _send_paginated_manufacturers_for_edit(
+    event: Union[types.Message, types.CallbackQuery],
+    state: FSMContext,
+    user_data: Dict[str, Any],
+    page: int = 0,
+    # Allow overriding some create_paginated_keyboard parameters for flexibility
+    item_callback_prefix_override: Optional[str] = None,
+    back_callback_key_override: Optional[str] = None,
+    back_callback_data_override: Optional[str] = None,
+    base_callback_data_override: Optional[str] = None # For pagination callback base
+):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(event.from_user.id, user_service):
+        msg = get_text("admin_access_denied", lang)
+        if isinstance(event, types.CallbackQuery): await event.answer(msg, show_alert=True)
+        else: await event.answer(msg)
+        return
+
+    manufacturers_on_page_data, total_manufacturers = await product_service.get_all_entities_paginated(
+        entity_type="manufacturer",
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        language=lang
+    )
+
+    title = get_text("admin_select_manufacturer_to_edit_title", lang)
+
+    if not manufacturers_on_page_data and page == 0:
+        empty_text = title + "\n\n" + get_text("admin_no_manufacturers_found", lang) # Using generic "no manufacturers found"
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_manufacturer_menu", lang, "admin_manufacturers_menu")).as_markup()
+        
+        target_message = event.message if isinstance(event, types.CallbackQuery) else event
+        if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+             await target_message.edit_text(empty_text, reply_markup=kb)
+        else:
+             await target_message.answer(empty_text, reply_markup=kb)
+        if isinstance(event, types.CallbackQuery): await event.answer()
+        return
+
+    await state.set_state(AdminProductStates.MANUFACTURER_SELECT_FOR_EDIT)
+    await state.update_data(current_manufacturer_edit_page=page)
+
+    keyboard = create_paginated_keyboard(
+        items=manufacturers_on_page_data,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_select_manufacturer_for_edit_page",
+        item_callback_prefix="admin_edit_manufacturer_prompt", # Action for selecting a manufacturer to edit
+        language=lang,
+        back_callback_key="back_to_manufacturer_menu",
+        back_callback_data="admin_manufacturers_menu",
+        total_items_override=total_manufacturers,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    
+    target_message = event.message if isinstance(event, types.CallbackQuery) else event
+    if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+        await target_message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML")
+        
+    if isinstance(event, types.CallbackQuery): await event.answer()
+
+@router.callback_query(F.data == "admin_edit_manufacturer_start", StateFilter("*"))
+async def cq_admin_edit_manufacturer_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    await _send_paginated_manufacturers_for_edit(callback, state, user_data, page=0)
+
+@router.callback_query(F.data.startswith("admin_select_manufacturer_for_edit_page:"), StateFilter(AdminProductStates.MANUFACTURER_SELECT_FOR_EDIT))
+async def cq_admin_select_manufacturer_for_edit_paginate(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        page = 0 # Default to page 0 if malformed
+    await _send_paginated_manufacturers_for_edit(callback, state, user_data, page=page)
+
+@router.callback_query(F.data.startswith("admin_edit_manufacturer_prompt:"), StateFilter(AdminProductStates.MANUFACTURER_SELECT_FOR_EDIT))
+async def cq_admin_edit_manufacturer_prompt_name(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        manufacturer_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang), show_alert=True)
+        return # Or redirect to list
+
+    manufacturer_entity = await product_service.get_entity_by_id("manufacturer", manufacturer_id, lang)
+    if not manufacturer_entity:
+        await callback.answer(get_text("admin_manufacturer_not_found", lang), show_alert=True)
+        current_page = (await state.get_data()).get("current_manufacturer_edit_page", 0)
+        return await _send_paginated_manufacturers_for_edit(callback, state, user_data, page=current_page)
+
+    current_name = manufacturer_entity.get("name", str(manufacturer_id))
+    
+    await state.set_state(AdminProductStates.MANUFACTURER_AWAIT_EDIT_NAME)
+    await state.update_data(editing_manufacturer_id=manufacturer_id, editing_manufacturer_current_name=current_name)
+
+    prompt_text = get_text("admin_enter_new_manufacturer_name_prompt", lang, current_name=hcode(current_name))
+    cancel_info = get_text("cancel_prompt", lang)
+    
+    # Provide a back button to go back to the selection list
+    # Back button to go back to the selection list, preserving the page
+    current_page = (await state.get_data()).get("current_manufacturer_edit_page", 0)
+    back_button_cb = f"admin_select_manufacturer_for_edit_page:{current_page}"
+    if callback.data == "admin_edit_manufacturer_start": # If came from menu directly, no page, go to page 0
+        back_button_cb = "admin_edit_manufacturer_start"
+
+
+    builder = InlineKeyboardBuilder()
+    # builder.row(create_back_button("back_to_manufacturer_selection", lang, back_button_cb)) # TODO: This back button might be tricky with message edits. For now, rely on /cancel.
+    
+    await callback.message.edit_text(f"{prompt_text}\n\n{hitalic(cancel_info)}", reply_markup=builder.as_markup(), parse_mode="HTML")
+    await callback.answer()
+
+@router.message(StateFilter(AdminProductStates.MANUFACTURER_AWAIT_EDIT_NAME), F.text)
+async def fsm_admin_manufacturer_new_name_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        # Before calling universal cancel, determine the correct "back" navigation
+        # Send them back to the manufacturer edit selection list
+        await message.answer(get_text("admin_action_cancelled", lang)) # Acknowledge cancel first
+        state_data = await state.get_data()
+        current_page = state_data.get("current_manufacturer_edit_page", 0)
+        # We need a CallbackQuery-like object or to call the list function directly with a message
+        # For simplicity, create a mock message event and call the list function.
+        # This is a bit of a workaround because universal_cancel might not be ideal here.
+        await state.clear() # Clear state first
+         # Create a temporary message to be edited by the paginated list function
+        temp_msg_for_list = await message.answer(get_text("loading_text", lang))
+        mock_event_for_list = temp_msg_for_list # It can take a message directly
+        return await _send_paginated_manufacturers_for_edit(mock_event_for_list, state, user_data, page=current_page)
+
+
+    state_data = await state.get_data()
+    manufacturer_id = state_data.get("editing_manufacturer_id")
+    original_name = state_data.get("editing_manufacturer_current_name")
+
+    if not manufacturer_id or original_name is None:
+        await message.answer(get_text("admin_action_failed_no_context", lang))
+        await state.clear()
+        # Send back to main manufacturers menu
+        return await cq_admin_manufacturers_menu_entry_point(message, state, user_data) # Assuming such a function exists or create one
+
+    new_name = sanitize_input(message.text)
+
+    if not new_name:
+        await message.answer(get_text("admin_manufacturer_name_empty_error", lang))
+        prompt_text = get_text("admin_enter_new_manufacturer_name_prompt", lang, current_name=hcode(original_name))
+        cancel_info = get_text("cancel_prompt", lang)
+        await message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML") # Re-prompt
+        return
+
+    if new_name == original_name:
+        await message.answer(get_text("admin_manufacturer_name_not_changed_error", lang, name=hcode(original_name)))
+        # Optionally, re-prompt or offer cancel. For now, just inform.
+        # To re-prompt:
+        # prompt_text = get_text("admin_enter_new_manufacturer_name_prompt", lang, current_name=hcode(original_name))
+        # cancel_info = get_text("cancel_prompt", lang)
+        # await message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML")
+        # return
+        # For now, we will proceed to send them back to the list after this message.
+        # Fall through to sending back to list.
+
+    success, msg_key, updated_details = await product_service.update_manufacturer_details(manufacturer_id, new_name, lang)
+
+    if success and updated_details:
+        await message.answer(get_text(msg_key, lang, name=hcode(updated_details['name'])))
+    else:
+        # Use original_name for context in error messages if new_name failed (e.g. duplicate)
+        await message.answer(get_text(msg_key, lang, name=hcode(new_name), original_name=hcode(original_name)))
+
+    await state.clear()
+    current_page = state_data.get("current_manufacturer_edit_page", 0)
+    # Send back to the list of manufacturers for editing.
+    # Create a temporary message that _send_paginated_manufacturers_for_edit can edit or reply to.
+    temp_msg_for_list_after_edit = await message.answer(get_text("loading_text", lang))
+    await _send_paginated_manufacturers_for_edit(temp_msg_for_list_after_edit, state, user_data, page=current_page)
+
+
 # --- Handler Registration (Illustrative - Actual registration in main bot file) ---
 # router.callback_query(F.data == "admin_delete_manufacturer_start", StateFilter("*"))(cq_admin_select_manufacturer_for_delete)
 # router.callback_query(F.data.startswith("admin_select_manufacturer_for_delete_page:"), StateFilter(AdminProductStates.MANUFACTURER_SELECT_FOR_DELETE))(cq_admin_select_manufacturer_for_delete_paginate)
@@ -1372,10 +1711,10 @@ async def cq_admin_execute_delete_manufacturer(callback: types.CallbackQuery, st
 # router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_NAME), F.text)(fsm_admin_location_name_received)
 # router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_ADDRESS), F.text)(fsm_admin_location_address_received)
 # router.callback_query(F.data.startswith("admin_list_locations_start") | F.data.startswith("admin_locations_list_page:"))(cq_admin_list_locations_start)
-# router.callback_query(F.data.startswith("admin_location_actions:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_location_actions)
-# router.callback_query(F.data.startswith("admin_edit_location_start:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_start)
-# router.callback_query(F.data.startswith("admin_edit_location_field:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_field_prompt)
-# router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_EDIT_NAME, AdminProductStates.LOCATION_AWAIT_EDIT_ADDRESS), F.text)(fsm_admin_location_edit_value_received)
+# router.callback_query(F.data.startswith("admin_location_actions:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_location_actions) # type: ignore
+# router.callback_query(F.data.startswith("admin_edit_location_start:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_start) # type: ignore
+# router.callback_query(F.data.startswith("admin_edit_location_field:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_edit_location_field_prompt) # type: ignore
+# router.message(StateFilter(AdminProductStates.LOCATION_AWAIT_EDIT_NAME, AdminProductStates.LOCATION_AWAIT_EDIT_ADDRESS), F.text)(fsm_admin_location_edit_value_received) # type: ignore
 # router.callback_query(F.data.startswith("admin_confirm_delete_location_prompt:"), StateFilter(AdminProductStates.LOCATION_SELECT_FOR_EDIT))(cq_admin_confirm_delete_location_prompt)
 # router.callback_query(F.data.startswith("admin_execute_delete_location:"), StateFilter(AdminProductStates.LOCATION_CONFIRM_DELETE))(cq_admin_execute_delete_location)
 
@@ -1383,7 +1722,7 @@ async def cq_admin_execute_delete_manufacturer(callback: types.CallbackQuery, st
 # --- Location Management Handlers ---
 
 @router.callback_query(F.data == "admin_locations_menu", StateFilter("*"))
-async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext): # type: ignore
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1391,13 +1730,13 @@ async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict
 
     await state.clear() # Clear state when entering the menu
     # Assuming create_admin_location_management_menu_keyboard will be defined in app.keyboards.inline
-    from app.keyboards.inline import create_admin_location_management_menu_keyboard 
-    keyboard = create_admin_location_management_menu_keyboard(lang) 
+    from app.keyboards.inline import create_admin_location_management_menu_keyboard
+    keyboard = create_admin_location_management_menu_keyboard(lang)
     await callback.message.edit_text(get_text("admin_location_management_title", lang), reply_markup=keyboard)
     await callback.answer()
 
 @router.callback_query(F.data == "admin_add_location_start", StateFilter("*"))
-async def cq_admin_add_location_start(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+async def cq_admin_add_location_start(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext): # type: ignore
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(callback.from_user.id, user_service):
@@ -1579,8 +1918,1256 @@ async def cq_admin_location_actions(callback: types.CallbackQuery, user_data: Di
                             address=location_details.get('address', get_text("not_specified_placeholder", lang)))
     
     # Assuming create_admin_location_item_actions_keyboard will be defined in app.keyboards.inline
-    from app.keyboards.inline import create_admin_location_item_actions_keyboard 
-    keyboard = create_admin_location_item_actions_keyboard(location_id, lang) 
+    from app.keyboards.inline import create_admin_location_item_actions_keyboard
+    keyboard = create_admin_location_item_actions_keyboard(location_id, lang)
 
     await callback.message.edit_text(details_text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
+
+
+# Placeholder for where cq_admin_manufacturers_menu would be if it's a separate entry point
+async def cq_admin_manufacturers_menu_entry_point(message_or_callback: Union[types.Message, types.CallbackQuery], state: FSMContext, user_data: Dict[str, Any]):
+    """Helper to navigate to the main manufacturer menu, e.g. after an action or cancel."""
+    lang = user_data.get("language", "en")
+    target_message = message_or_callback.message if isinstance(message_or_callback, types.CallbackQuery) else message_or_callback
+    
+    keyboard = create_admin_manufacturer_management_menu_keyboard(lang)
+    text = get_text("admin_manufacturer_management_title", lang)
+    
+    # Clear state before navigating to a main menu
+    await state.clear()
+
+    if isinstance(message_or_callback, types.CallbackQuery) and hasattr(target_message, "edit_text"):
+        try:
+            await target_message.edit_text(text, reply_markup=keyboard)
+        except Exception as e: # If edit fails, send new message
+            logger.debug(f"Failed to edit message for cq_admin_manufacturers_menu_entry_point: {e}")
+            await target_message.answer(text, reply_markup=keyboard)
+    else:
+        await target_message.answer(text, reply_markup=keyboard)
+    
+    if isinstance(message_or_callback, types.CallbackQuery):
+        await message_or_callback.answer()
+
+
+# --- Product Creation Handlers ---
+
+@router.callback_query(F.data == "admin_prod_add_start", StateFilter("*"))
+async def cq_admin_prod_add_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    # Clear any previous product creation data
+    await state.update_data(product_data={}, product_localizations_temp=[])
+    
+    await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="manufacturer", page=0)
+
+@router.callback_query(F.data == "admin_prod_add_cancel_to_menu", StateFilter(AdminProductStates)) # Universal cancel for this flow
+async def cq_admin_prod_add_cancel_to_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    await callback.answer(get_text("admin_action_cancelled", lang))
+    await state.clear()
+    
+    # Go to Product Management Menu
+    prod_menu_text = get_text("admin_product_management_title", lang)
+    prod_menu_kb = create_admin_product_management_menu_keyboard(lang)
+    await callback.message.edit_text(prod_menu_text, reply_markup=prod_menu_kb)
+
+
+# Pagination for manufacturer selection during product creation
+@router.callback_query(F.data.startswith("admin_prod_create_page_manufacturer:"), StateFilter(AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID))
+async def cq_admin_prod_create_page_manufacturer(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        page = 0
+    await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="manufacturer", page=page)
+
+# Pagination for category selection during product creation
+@router.callback_query(F.data.startswith("admin_prod_create_page_category:"), StateFilter(AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID))
+async def cq_admin_prod_create_page_category(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        page = 0
+    await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=page)
+
+
+# Handler for selecting manufacturer during product creation
+@router.callback_query(F.data.startswith("admin_prod_create_select_manufacturer:"), StateFilter(AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID))
+async def cq_admin_prod_create_select_manufacturer(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService() # To validate manufacturer exists
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        manufacturer_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang), show_alert=True)
+        # Go back to manufacturer selection
+        current_page = (await state.get_data()).get("current_manufacturer_selection_page", 0)
+        return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="manufacturer", page=current_page)
+
+    # Verify manufacturer exists (important if list is somehow stale)
+    manufacturer = await product_service.get_entity_by_id("manufacturer", manufacturer_id, lang)
+    if not manufacturer:
+        await callback.answer(get_text("admin_error_manufacturer_not_found_short", lang), show_alert=True) # Using a short version
+        current_page = (await state.get_data()).get("current_manufacturer_selection_page", 0)
+        return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="manufacturer", page=current_page)
+
+    current_product_data = (await state.get_data()).get("product_data", {})
+    current_product_data["manufacturer_id"] = manufacturer_id
+    current_product_data["manufacturer_name"] = manufacturer.get("name", str(manufacturer_id)) # Store name for summary
+    await state.update_data(product_data=current_product_data)
+    
+    # Now ask for category
+    await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=0)
+
+
+# Handler for selecting category (or skipping) during product creation
+@router.callback_query(F.data.startswith("admin_prod_create_select_category:"), StateFilter(AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID))
+async def cq_admin_prod_create_select_category(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService() # To validate category exists if not skipped
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    category_id_str = callback.data.split(":")[1]
+    category_id = None
+    category_name = get_text("not_applicable_short", lang) # Default if skipped
+
+    if category_id_str.lower() == "skip":
+        category_id = None
+    else:
+        try:
+            category_id = int(category_id_str)
+            # Verify category exists
+            category = await product_service.get_entity_by_id("category", category_id, lang)
+            if not category:
+                await callback.answer(get_text("admin_error_category_not_found_short", lang), show_alert=True)
+                current_page = (await state.get_data()).get("current_category_selection_page", 0)
+                return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=current_page)
+            category_name = category.get("name", str(category_id))
+        except ValueError:
+            await callback.answer(get_text("error_occurred", lang), show_alert=True)
+            current_page = (await state.get_data()).get("current_category_selection_page", 0)
+            return await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=current_page)
+
+    current_product_data = (await state.get_data()).get("product_data", {})
+    current_product_data["category_id"] = category_id # Will be None if skipped
+    current_product_data["category_name"] = category_name # Store name for summary
+    await state.update_data(product_data=current_product_data)
+
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_COST)
+    prompt_text = get_text("admin_prod_enter_cost", lang)
+    cancel_info = get_text("cancel_prompt", lang)
+    # Remove inline keyboard from previous message by sending a new one
+    try: # Try to edit the existing message first to avoid clutter
+        await callback.message.edit_text(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=None) # Remove kbd
+    except Exception: # If edit fails (e.g. message too old or content unchanged), send new.
+        await callback.message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    await callback.answer() # Acknowledge the callback
+
+# --- Message handlers for product data input ---
+
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_COST), F.text)
+async def fsm_admin_prod_cost_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        # Create a mock callback to use the cancel flow that returns to product menu
+        mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+        return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    try:
+        cost = Decimal(sanitize_input(message.text))
+        if cost <= 0:
+            raise ValueError("Cost must be positive.")
+    except (DecimalInvalidOperation, ValueError):
+        await message.answer(get_text("admin_prod_invalid_cost_format", lang))
+        # Re-prompt for cost
+        prompt_text = get_text("admin_prod_enter_cost", lang)
+        cancel_info = get_text("cancel_prompt", lang)
+        await message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML")
+        return
+
+    current_product_data = (await state.get_data()).get("product_data", {})
+    current_product_data["cost"] = cost
+    await state.update_data(product_data=current_product_data)
+
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_SKU)
+    prompt_text = get_text("admin_prod_enter_sku", lang)
+    skip_info = get_text("admin_prod_skip_instruction_generic", lang)
+    cancel_info = get_text("cancel_prompt", lang)
+    await message.answer(f"{prompt_text}\n\n{hitalic(skip_info)}\n{hitalic(cancel_info)}", parse_mode="HTML")
+
+
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_SKU), F.text)
+async def fsm_admin_prod_sku_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+        return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    sku_input = sanitize_input(message.text)
+    sku = sku_input if sku_input != "-" else None
+
+    current_product_data = (await state.get_data()).get("product_data", {})
+    current_product_data["sku"] = sku
+    await state.update_data(product_data=current_product_data)
+
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_VARIATION)
+    prompt_text = get_text("admin_prod_enter_variation", lang)
+    skip_info = get_text("admin_prod_skip_instruction_generic", lang)
+    cancel_info = get_text("cancel_prompt", lang)
+    await message.answer(f"{prompt_text}\n\n{hitalic(skip_info)}\n{hitalic(cancel_info)}", parse_mode="HTML")
+
+
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_VARIATION), F.text)
+async def fsm_admin_prod_variation_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+        return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    variation_input = sanitize_input(message.text)
+    variation = variation_input if variation_input != "-" else None
+
+    current_product_data = (await state.get_data()).get("product_data", {})
+    current_product_data["variation"] = variation
+    await state.update_data(product_data=current_product_data)
+
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_IMAGE_URL)
+    prompt_text = get_text("admin_prod_enter_image_url", lang)
+    skip_info = get_text("admin_prod_skip_instruction_generic", lang)
+    cancel_info = get_text("cancel_prompt", lang)
+    await message.answer(f"{prompt_text}\n\n{hitalic(skip_info)}\n{hitalic(cancel_info)}", parse_mode="HTML")
+
+
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_IMAGE_URL), F.text)
+async def fsm_admin_prod_image_url_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+        return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    image_url_input = sanitize_input(message.text)
+    image_url = image_url_input if image_url_input != "-" else None
+    
+    # Basic URL validation could be added here if desired, e.g. checking for http/https
+    # For now, any non-empty string (or None if skipped) is accepted.
+
+    current_product_data = (await state.get_data()).get("product_data", {})
+    current_product_data["image_url"] = image_url
+    await state.update_data(product_data=current_product_data)
+
+    # Transition to localization
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE)
+    # Call the helper that asks for localization language
+    # We need a message or callback object for this helper. Let's use the current message.
+    await _admin_prod_create_ask_localization_lang(message, state, user_data)
+
+
+# --- Localization Loop Handlers for Product Creation ---
+
+async def _admin_prod_create_ask_localization_lang(
+    event: Union[types.Message, types.CallbackQuery], 
+    state: FSMContext, 
+    user_data: Dict[str, Any]
+):
+    lang = user_data.get("language", "en") # Admin's language
+    state_data = await state.get_data()
+    product_localizations_temp = state_data.get("product_localizations_temp", [])
+    existing_lang_codes = [loc['language_code'] for loc in product_localizations_temp]
+
+    # Check if all supported languages are already localized
+    # (Assuming ALL_TEXTS['language_name_en'] contains all supported bot languages)
+    # This import might be better at the top of the file.
+    from app.localization.locales import TEXTS as ALL_LANG_TEXTS 
+    all_supported_langs = list(ALL_LANG_TEXTS.get("language_name_en", {}).keys())
+    
+    available_langs_for_new_loc = [lc for lc in all_supported_langs if lc not in existing_lang_codes and lc is not None]
+
+    target_message = event.message if isinstance(event, types.CallbackQuery) else event
+    
+    if not available_langs_for_new_loc and not product_localizations_temp:
+        # This case should ideally not be reached if the first localization is enforced.
+        # For now, if it happens, prompt for the admin's current language as the first localization lang.
+        # Or, could force a specific default like 'en'.
+        # This ensures at least one localization is attempted.
+        first_loc_lang_to_try = lang 
+        if first_loc_lang_to_try in existing_lang_codes: # Should not happen if product_localizations_temp is empty
+            first_loc_lang_to_try = 'en' if 'en' not in existing_lang_codes else (all_supported_langs[0] if all_supported_langs else 'en')
+
+        if first_loc_lang_to_try: # Ensure there's a lang to try
+             await state.update_data(current_localization_lang=first_loc_lang_to_try)
+             await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME)
+             prompt_text = get_text("admin_prod_enter_loc_name_forced_first", lang, lang_name=get_text(f"language_name_{first_loc_lang_to_try}", lang))
+             cancel_info = get_text("cancel_prompt", lang)
+             await target_message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+             if isinstance(event, types.CallbackQuery): await event.answer()
+             return
+        else: # No supported languages at all (config issue)
+            await target_message.answer(get_text("admin_prod_error_no_languages_configured", lang), reply_markup=types.ReplyKeyboardRemove())
+            # Potentially cancel flow or go back to product menu
+            mock_callback = types.CallbackQuery(id=str(event.id)+"_err_no_lang", from_user=event.from_user, chat_instance=str(target_message.chat.id), message=target_message, data="admin_prod_add_cancel_to_menu")
+            await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+            if isinstance(event, types.CallbackQuery): await event.answer()
+            return
+
+
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE)
+    
+    # Use the existing keyboard function and add "Done" button dynamically
+    # The product_id argument in create_admin_select_lang_for_localization_keyboard is not relevant for new product creation.
+    # We can pass a dummy one or modify the keyboard function if it's problematic. For now, assume it handles it or pass 0.
+    builder = InlineKeyboardBuilder.from_markup(
+        create_admin_select_lang_for_localization_keyboard(
+            product_id=0, # Dummy product_id for new product
+            action_prefix="admin_prod_create_select_loc_lang", 
+            language=lang, 
+            existing_lang_codes=existing_lang_codes
+        )
+    )
+
+    if product_localizations_temp: # If at least one localization has been added
+        builder.row(InlineKeyboardButton(
+            text=get_text("admin_prod_done_localizations", lang), 
+            callback_data="admin_prod_create_confirm_details"
+        ))
+    
+    prompt_text_key = "admin_prod_select_loc_lang"
+    if not available_langs_for_new_loc and product_localizations_temp: # All langs done, only "Done" makes sense
+        prompt_text_key = "admin_prod_all_langs_localized_proceed"
+    elif not product_localizations_temp: # First localization being added
+        prompt_text_key = "admin_prod_select_first_loc_lang"
+
+
+    final_prompt_text = get_text(prompt_text_key, lang)
+    
+    # If message is from a text input, send new message. If callback, edit.
+    if isinstance(event, types.Message):
+        await event.answer(final_prompt_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    elif isinstance(event, types.CallbackQuery):
+        try:
+            await event.message.edit_text(final_prompt_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        except Exception: # If edit fails, send as new message
+             await event.message.answer(final_prompt_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        await event.answer()
+
+
+@router.callback_query(F.data.startswith("admin_prod_create_select_loc_lang:"), StateFilter(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE))
+async def cq_admin_prod_create_select_loc_lang(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en") # Admin's language
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    selected_loc_lang = callback.data.split(":")[1]
+    
+    # Validate selected_loc_lang (e.g. ensure it's in supported languages) - though keyboard should only show valid ones
+    from app.localization.locales import TEXTS as ALL_LANG_TEXTS
+    if selected_loc_lang not in ALL_LANG_TEXTS.get("language_name_en", {}):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid language selected.", show_alert=True)
+        # Re-ask for language
+        return await _admin_prod_create_ask_localization_lang(callback, state, user_data)
+
+    await state.update_data(current_localization_lang=selected_loc_lang)
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME)
+    
+    lang_display_name = get_text(f"language_name_{selected_loc_lang}", lang) # Get display name in admin's language
+    prompt_text = get_text("admin_prod_enter_loc_name", lang, lang_name=lang_display_name)
+    cancel_info = get_text("cancel_prompt", lang)
+
+    try:
+        await callback.message.edit_text(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=None)
+    except Exception:
+        await callback.message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    await callback.answer()
+
+
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME), F.text)
+async def fsm_admin_prod_loc_name_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    state_data = await state.get_data()
+    product_id_for_edit_context = state_data.get("current_edit_product_id")
+    # Determine active language code (either being edited or being added)
+    active_loc_lang_code = state_data.get("editing_loc_lang_code") or state_data.get("current_localization_lang")
+
+    if message.text.lower() == "/cancel":
+        if product_id_for_edit_context: # If editing an existing product's localization
+            await message.answer(get_text("admin_action_cancelled", lang))
+            temp_msg = await message.answer(get_text("loading_text", lang), reply_markup=types.ReplyKeyboardRemove())
+            mock_cb = types.CallbackQuery(id=str(message.message_id)+"_cancel_loc_edit", from_user=message.from_user, chat_instance=str(message.chat.id), message=temp_msg, data=f"admin_prod_edit_locs_menu:{product_id_for_edit_context}")
+            return await cq_admin_prod_edit_locs_menu(mock_cb, state, user_data)
+        else: # Product creation flow
+            mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel_loc_create", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+            return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    loc_name = sanitize_input(message.text)
+    if not loc_name:
+        lang_display_name = get_text(f"language_name_{active_loc_lang_code}", lang, default=active_loc_lang_code.upper() if active_loc_lang_code else "the language")
+        await message.answer(get_text("admin_prod_loc_name_empty", lang, lang_name=lang_display_name))
+        prompt_text = get_text("admin_prod_enter_loc_name", lang, lang_name=lang_display_name)
+        cancel_info_key = "cancel_prompt_short_to_loc_menu" if product_id_for_edit_context else "cancel_prompt"
+        cancel_text = get_text(cancel_info_key, lang, command="/cancel", product_id=product_id_for_edit_context)
+        await message.answer(f"{prompt_text}\n\n{hitalic(cancel_text)}", parse_mode="HTML")
+        return
+
+    await state.update_data(current_localization_name_temp=loc_name) # Store temporarily
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION)
+    
+    lang_display_name = get_text(f"language_name_{active_loc_lang_code}", lang, default=active_loc_lang_code.upper() if active_loc_lang_code else "the language")
+    prompt_text = get_text("admin_prod_enter_loc_desc", lang, lang_name=lang_display_name)
+    skip_info = get_text("admin_prod_skip_instruction_generic", lang)
+    cancel_info_key = "cancel_prompt_short_to_loc_menu" if product_id_for_edit_context else "cancel_prompt"
+    cancel_text = get_text(cancel_info_key, lang, command="/cancel", product_id=product_id_for_edit_context)
+    await message.answer(f"{prompt_text}\n\n{hitalic(skip_info)}\n{hitalic(cancel_text)}", parse_mode="HTML")
+
+
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION), F.text)
+async def fsm_admin_prod_loc_desc_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    admin_id = message.from_user.id
+    user_service = UserService()
+    product_service = ProductService() # For saving localization
+    if not await is_admin_user_check(admin_id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    state_data = await state.get_data()
+    product_id_for_edit_context = state_data.get("current_edit_product_id")
+    active_loc_lang_code = state_data.get("editing_loc_lang_code") or state_data.get("current_localization_lang")
+    current_loc_name = state_data.get("current_localization_name_temp") # Use temp name
+
+    if message.text.lower() == "/cancel":
+        if product_id_for_edit_context:
+            await message.answer(get_text("admin_action_cancelled", lang))
+            temp_msg = await message.answer(get_text("loading_text", lang), reply_markup=types.ReplyKeyboardRemove())
+            mock_cb = types.CallbackQuery(id=str(message.message_id)+"_cancel_loc_edit_desc", from_user=message.from_user, chat_instance=str(message.chat.id), message=temp_msg, data=f"admin_prod_edit_locs_menu:{product_id_for_edit_context}")
+            return await cq_admin_prod_edit_locs_menu(mock_cb, state, user_data)
+        else:
+            mock_callback = types.CallbackQuery(id=str(message.message_id)+"_cancel_loc_create_desc", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+            return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    loc_desc_input = sanitize_input(message.text)
+    loc_desc = loc_desc_input if loc_desc_input != "-" else None
+
+    if not active_loc_lang_code or not current_loc_name:
+        await message.answer(get_text("admin_action_failed_no_context", lang))
+        # Determine correct cancel/fallback
+        if product_id_for_edit_context:
+            temp_msg = await message.answer(get_text("loading_text", lang),reply_markup=types.ReplyKeyboardRemove())
+            mock_cb = types.CallbackQuery(id=str(message.message_id)+"_ctx_lost_loc_edit", from_user=message.from_user, chat_instance=str(message.chat.id), message=temp_msg, data=f"admin_prod_edit_locs_menu:{product_id_for_edit_context}")
+            return await cq_admin_prod_edit_locs_menu(mock_cb, state, user_data)
+        else:
+            mock_callback = types.CallbackQuery(id=str(message.message_id)+"_ctx_lost_loc_create", from_user=message.from_user, chat_instance=str(message.chat.id), message=message, data="admin_prod_add_cancel_to_menu")
+            return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
+
+    if product_id_for_edit_context: # Editing/Adding localization for an EXISTING product
+        success, msg_key = await product_service.add_or_update_product_localization_service(
+            admin_id=admin_id, product_id=product_id_for_edit_context,
+            loc_lang_code=active_loc_lang_code, name=current_loc_name, description=loc_desc, lang=lang
+        )
+        await message.answer(get_text(msg_key, lang, lang_name=get_text(f"language_name_{active_loc_lang_code}",lang, default=active_loc_lang_code.upper())))
+        
+        # Clear temporary localization data and editing flags
+        await state.update_data(current_localization_lang=None, editing_loc_lang_code=None, current_localization_name_temp=None)
+        
+        # Go back to the localization menu for the current product
+        temp_msg_for_loc_menu = await message.answer(get_text("loading_text", lang),reply_markup=types.ReplyKeyboardRemove())
+        mock_callback_to_loc_menu = types.CallbackQuery(
+            id=str(message.message_id) + "_after_loc_save", from_user=message.from_user,
+            chat_instance=str(message.chat.id), message=temp_msg_for_loc_menu, data=f"admin_prod_edit_locs_menu:{product_id_for_edit_context}"
+        )
+        await cq_admin_prod_edit_locs_menu(mock_callback_to_loc_menu, state, user_data)
+
+    else: # Part of NEW product creation flow
+        product_localizations_temp = state_data.get("product_localizations_temp", [])
+        # Update if lang_code already in temp list (e.g. user went back and re-added for same lang)
+        found_idx = -1
+        for i, loc in enumerate(product_localizations_temp):
+            if loc["language_code"] == active_loc_lang_code:
+                found_idx = i
+                break
+        if found_idx != -1:
+            product_localizations_temp[found_idx] = {"language_code": active_loc_lang_code, "name": current_loc_name, "description": loc_desc}
+        else:
+            product_localizations_temp.append({"language_code": active_loc_lang_code, "name": current_loc_name, "description": loc_desc})
+        
+        await state.update_data(product_localizations_temp=product_localizations_temp)
+        await state.update_data(current_localization_lang=None, current_localization_name_temp=None) # Clear single loc context
+        
+        lang_display_name = get_text(f"language_name_{active_loc_lang_code}", lang, default=active_loc_lang_code.upper())
+        await message.answer(get_text("admin_prod_loc_added_ask_more", lang, lang_name=lang_display_name))
+        await _admin_prod_create_ask_localization_lang(message, state, user_data) # Loop for new product
+
+
+# --- Product Localization Edit/Add Handlers (for existing product) ---
+
+@router.callback_query(F.data.startswith("admin_prod_edit_locs_menu:"), StateFilter("*")) # Accessible from product edit options
+async def cq_admin_prod_edit_locs_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        product_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID.", show_alert=True)
+        # Go back to main product menu if ID is bad
+        prod_menu_text = get_text("admin_product_management_title", lang)
+        prod_menu_kb = create_admin_product_management_menu_keyboard(lang)
+        await callback.message.edit_text(prod_menu_text, reply_markup=prod_menu_kb)
+        return
+
+    product_details = await product_service.get_product_details_for_admin(product_id, lang)
+    if not product_details:
+        await callback.answer(get_text("admin_product_not_found", lang), show_alert=True)
+        # Go back to product selection for editing
+        return await cq_admin_prod_edit_select(callback, state, user_data)
+
+
+    await state.set_state(AdminProductStates.PRODUCT_MANAGE_LOCALIZATIONS)
+    await state.update_data(
+        current_edit_product_id=product_id, 
+        current_edit_product_name=product_details.get("sku", str(product_id)) # Basic name for context
+    )
+    
+    # create_admin_localization_actions_keyboard expects product_id, list of current localizations, and admin lang
+    # The list of localizations should be part of product_details
+    existing_localizations = product_details.get("localizations", [])
+    
+    keyboard = create_admin_localization_actions_keyboard(product_id, existing_localizations, lang)
+    title = get_text("admin_prod_edit_locs_menu_title", lang, product_name=hbold(product_details.get("sku", str(product_id))))
+
+    try:
+        await callback.message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(title, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_prod_edit_loc_select:"), StateFilter(AdminProductStates.PRODUCT_MANAGE_LOCALIZATIONS))
+async def cq_admin_prod_edit_loc_select(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    """Handles selection of an existing localization to edit its name/description."""
+    lang = user_data.get("language", "en") # Admin's language
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(":")
+    if len(parts) != 3: # prefix:product_id:loc_lang_code
+        await callback.answer(get_text("error_occurred", lang) + " Invalid localization selection.", show_alert=True)
+        return
+
+    product_id_str, loc_lang_code_to_edit = parts[1], parts[2]
+    try:
+        product_id = int(product_id_str)
+    except ValueError:
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID for loc edit.", show_alert=True)
+        return # Or navigate back
+
+    await state.update_data(
+        current_edit_product_id=product_id, # Already should be there, but good to confirm
+        editing_loc_lang_code=loc_lang_code_to_edit, # Specific for editing existing
+        current_localization_lang=None # Clear if adding new
+    )
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME)
+    
+    # Get display name for the language being edited (in admin's current language)
+    lang_display_name = get_text(f"language_name_{loc_lang_code_to_edit}", lang, default=loc_lang_code_to_edit.upper())
+    prompt_text = get_text("admin_prod_edit_loc_enter_name", lang, lang_name=lang_display_name)
+    cancel_info = get_text("cancel_prompt_short", lang, command="/cancel") # Cancel goes to loc menu
+
+    try:
+        await callback.message.edit_text(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=None)
+    except Exception:
+        await callback.message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_prod_add_loc_start:"), StateFilter(AdminProductStates.PRODUCT_MANAGE_LOCALIZATIONS))
+async def cq_admin_prod_add_loc_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    """Handles 'Add Localization' button for an existing product."""
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        product_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID for adding loc.", show_alert=True)
+        return
+
+    # Fetch existing localizations to exclude them from selection
+    product_details = await product_service.get_product_details_for_admin(product_id, lang)
+    if not product_details: # Should not happen if user is in this menu
+        await callback.answer(get_text("admin_product_not_found", lang), show_alert=True)
+        return
+    
+    existing_lang_codes = [loc['lang_code'] for loc in product_details.get("localizations", [])]
+
+    await state.update_data(
+        current_edit_product_id=product_id, # Keep product context
+        editing_loc_lang_code=None, # Clear if editing existing
+        current_localization_lang=None # Will be set by next step
+    )
+    await state.set_state(AdminProductStates.PRODUCT_SELECT_NEW_LOCALIZATION_LANG)
+
+    keyboard = create_admin_select_lang_for_localization_keyboard(
+        product_id=product_id,
+        action_prefix="admin_prod_edit_add_new_loc_lang", # Specific callback for this flow
+        language=lang,
+        existing_lang_codes=existing_lang_codes
+    )
+    prompt_text = get_text("admin_prod_add_loc_select_lang", lang)
+    
+    # Check if any languages are available to add
+    from app.localization.locales import TEXTS as ALL_LANG_TEXTS 
+    all_supported_langs = list(ALL_LANG_TEXTS.get("language_name_en", {}).keys())
+    available_to_add = [lc for lc in all_supported_langs if lc not in existing_lang_codes and lc is not None]
+
+    if not available_to_add:
+        prompt_text = get_text("admin_prod_all_langs_already_localized", lang)
+        # Keyboard will be just a cancel/back button from create_admin_select_lang_for_localization_keyboard
+        # if no languages are available.
+
+    try:
+        await callback.message.edit_text(prompt_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception:
+        await callback.message.answer(prompt_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_prod_edit_add_new_loc_lang:"), StateFilter(AdminProductStates.PRODUCT_SELECT_NEW_LOCALIZATION_LANG))
+async def cq_admin_prod_edit_add_new_loc_lang(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    """Handles selection of a new language to add localization for an existing product."""
+    lang = user_data.get("language", "en") # Admin's language
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(":")
+    if len(parts) != 3: # prefix:product_id:new_loc_lang
+        await callback.answer(get_text("error_occurred", lang) + " Invalid lang selection for new loc.", show_alert=True)
+        return
+
+    product_id_str, new_loc_lang_code = parts[1], parts[2]
+    try:
+        product_id = int(product_id_str)
+    except ValueError: # Should not happen with keyboard
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID for new loc lang.", show_alert=True)
+        return
+
+    await state.update_data(
+        current_edit_product_id=product_id, 
+        current_localization_lang=new_loc_lang_code, # This is for a NEW localization being added
+        editing_loc_lang_code=None # Clear this to signify it's not editing an existing one
+    )
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME)
+    
+    lang_display_name = get_text(f"language_name_{new_loc_lang_code}", lang)
+    prompt_text = get_text("admin_prod_enter_loc_name", lang, lang_name=lang_display_name) # Re-use existing key
+    cancel_info = get_text("cancel_prompt_short", lang, command="/cancel") # Cancel goes to loc menu
+
+    try:
+        await callback.message.edit_text(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=None)
+    except Exception:
+        await callback.message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    await callback.answer()
+
+# fsm_admin_prod_loc_name_received and fsm_admin_prod_loc_desc_received need to be context-aware
+# (create vs edit product, and add new loc vs edit existing loc for a product)
+# The main change will be the navigation at the end:
+# - If creating product -> _admin_prod_create_ask_localization_lang
+# - If editing product's localizations -> cq_admin_prod_edit_locs_menu (mocked callback)
+
+# The existing fsm_admin_prod_loc_name_received and fsm_admin_prod_loc_desc_received
+# already use state_data.get("current_localization_lang") for the language code,
+# which is set correctly by cq_admin_prod_edit_loc_select (as editing_loc_lang_code then used)
+# or by cq_admin_prod_edit_add_new_loc_lang (as current_localization_lang).
+# The main difference is the "cancel" and "after save" navigation.
+# We need to ensure /cancel in these states, when editing an existing product's localization,
+# goes back to the localization menu for that product (cq_admin_prod_edit_locs_menu).
+
+# The existing `fsm_admin_prod_loc_desc_received` calls `_admin_prod_create_ask_localization_lang`
+# This needs to be conditional. If `editing_loc_lang_code` is in state, it means we are editing
+# an existing product's localization, so after saving, we should go back to `cq_admin_prod_edit_locs_menu`.
+
+# This will require modifying fsm_admin_prod_loc_desc_received and potentially fsm_admin_prod_loc_name_received
+# for their /cancel behavior when in the context of editing an existing product.
+# For now, I will assume the existing structure of these two handlers will be adapted or
+# new specific handlers will be created if the logic becomes too complex.
+# The service method `add_or_update_product_localization_service` is fine.
+
+
+# --- Product Deletion Handlers ---
+
+@router.callback_query(F.data.startswith("admin_prod_delete_confirm:"), StateFilter("*")) # Can be called from product view
+async def cq_admin_prod_delete_confirm(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        product_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID for delete confirmation.", show_alert=True)
+        # Go back to product list if ID is bad
+        return await _send_paginated_products_list(callback, state, user_data, page=0)
+
+    # Fetch product details to get its name for the confirmation message
+    product_details = await product_service.get_product_details_for_admin(product_id, lang)
+    if not product_details:
+        await callback.answer(get_text("admin_product_not_found", lang), show_alert=True)
+        return await _send_paginated_products_list(callback, state, user_data, page=0)
+
+    # Determine a primary name for confirmation
+    product_name_display = product_details.get("sku", str(product_id)) # Default
+    if product_details.get("localizations"):
+        name_found = False
+        for loc in product_details["localizations"]:
+            if loc['lang_code'] == lang:
+                product_name_display = loc['name']
+                name_found = True
+                break
+        if not name_found: # Fallback to English or first if admin lang not found
+            for loc_item in product_details["localizations"]: # Renamed loc to loc_item to avoid conflict
+                if loc_item['lang_code'] == 'en':
+                    product_name_display = loc_item['name']
+                    name_found = True
+                    break
+            if not name_found and product_details["localizations"]: # Check if localizations list is not empty
+                 product_name_display = product_details["localizations"][0]['name']
+
+
+    await state.set_state(AdminProductStates.PRODUCT_CONFIRM_DELETE)
+    await state.update_data(
+        product_to_delete_id=product_id,
+        product_to_delete_name=product_name_display 
+    )
+
+    confirmation_text = get_text("admin_prod_confirm_delete_prompt", lang, product_name=hbold(product_name_display), product_id=product_id)
+    keyboard = create_confirmation_keyboard(
+        language=lang,
+        yes_callback=f"admin_prod_execute_delete:{product_id}",
+        no_callback=f"admin_prod_view:{product_id}" # Back to view details of this product
+    )
+    
+    try:
+        await callback.message.edit_text(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception: # If message too long or other error
+        await callback.message.answer(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_prod_execute_delete:"), StateFilter(AdminProductStates.PRODUCT_CONFIRM_DELETE))
+async def cq_admin_prod_execute_delete(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    admin_id = callback.from_user.id
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(admin_id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    state_data = await state.get_data()
+    product_id_from_state = state_data.get("product_to_delete_id")
+    product_name_from_state = state_data.get("product_to_delete_name", f"ID {product_id_from_state}")
+
+    try:
+        product_id_from_cb = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID in delete execution.", show_alert=True)
+        return await _send_paginated_products_list(callback, state, user_data, page=0) # Fallback to list
+
+    if product_id_from_state != product_id_from_cb:
+        logger.warning(f"Product ID mismatch during delete execution. State: {product_id_from_state}, Callback: {product_id_from_cb}. Using callback ID.")
+        # Re-fetch name for accuracy if this happens, though product_service.delete_product_by_admin also fetches name
+        temp_details_for_name = await product_service.get_product_details_for_admin(product_id_from_cb, lang)
+        if temp_details_for_name:
+            product_name_from_state = temp_details_for_name.get("sku", str(product_id_from_cb)) # Update name based on CB ID
+            if temp_details_for_name.get("localizations"):
+                name_found = False
+                for loc in temp_details_for_name["localizations"]:
+                    if loc['lang_code'] == lang: product_name_from_state = loc['name']; name_found = True; break
+                if not name_found:
+                    for loc in temp_details_for_name["localizations"]:
+                        if loc['lang_code'] == 'en': product_name_from_state = loc['name']; name_found = True; break
+                    if not name_found and temp_details_for_name["localizations"]: product_name_from_state = temp_details_for_name["localizations"][0]['name']
+
+
+    success, message_key, deleted_product_name = await product_service.delete_product_by_admin(
+        admin_id=admin_id,
+        product_id=product_id_from_cb, 
+        lang=lang
+    )
+    
+    display_name_for_message = deleted_product_name or product_name_from_state # Prefer name from service response
+
+    final_message = get_text(message_key, lang, product_name=hbold(display_name_for_message), product_id=product_id_from_cb)
+    await callback.answer(final_message, show_alert=True) 
+
+    await state.clear() 
+    
+    # Navigate back to product list (page 0)
+    # Need to ensure the target message for _send_paginated_products_list can be edited
+    # If original message was from a button that opened a new message for confirmation, this might be tricky.
+    # For now, assume callback.message is the one to edit.
+    await _send_paginated_products_list(callback, state, user_data, page=0)
+
+
+ # --- Product List and View Details Handlers ---
+
+@router.callback_query(F.data.startswith("admin_prod_delete_confirm:"), StateFilter("*")) # Can be called from product view
+async def cq_admin_prod_delete_confirm(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        product_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID for delete confirmation.", show_alert=True)
+        # Go back to product list if ID is bad
+        return await _send_paginated_products_list(callback, state, user_data, page=0)
+
+    # Fetch product details to get its name for the confirmation message
+    product_details = await product_service.get_product_details_for_admin(product_id, lang)
+    if not product_details:
+        await callback.answer(get_text("admin_product_not_found", lang), show_alert=True)
+        return await _send_paginated_products_list(callback, state, user_data, page=0)
+
+    # Determine a primary name for confirmation
+    product_name_display = product_details.get("sku", str(product_id)) # Default
+    if product_details.get("localizations"):
+        name_found = False
+        for loc in product_details["localizations"]:
+            if loc['lang_code'] == lang:
+                product_name_display = loc['name']
+                name_found = True
+                break
+        if not name_found: # Fallback to English or first if admin lang not found
+            for loc in product_details["localizations"]:
+                if loc['lang_code'] == 'en':
+                    product_name_display = loc['name']
+                    name_found = True
+                    break
+            if not name_found and product_details["localizations"]:
+                 product_name_display = product_details["localizations"][0]['name']
+
+
+    await state.set_state(AdminProductStates.PRODUCT_CONFIRM_DELETE)
+    await state.update_data(
+        product_to_delete_id=product_id,
+        product_to_delete_name=product_name_display 
+    )
+
+    confirmation_text = get_text("admin_prod_confirm_delete_prompt", lang, product_name=hbold(product_name_display), product_id=product_id)
+    keyboard = create_confirmation_keyboard(
+        language=lang,
+        yes_callback=f"admin_prod_execute_delete:{product_id}",
+        no_callback=f"admin_prod_view:{product_id}" # Back to view details of this product
+    )
+    
+    try:
+        await callback.message.edit_text(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception: # If message too long or other error
+        await callback.message.answer(confirmation_text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_prod_execute_delete:"), StateFilter(AdminProductStates.PRODUCT_CONFIRM_DELETE))
+async def cq_admin_prod_execute_delete(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    admin_id = callback.from_user.id
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(admin_id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    state_data = await state.get_data()
+    product_id_from_state = state_data.get("product_to_delete_id")
+    product_name_from_state = state_data.get("product_to_delete_name", f"ID {product_id_from_state}")
+
+    try:
+        product_id_from_cb = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang) + " Invalid product ID in delete execution.", show_alert=True)
+        return await _send_paginated_products_list(callback, state, user_data, page=0) # Fallback to list
+
+    if product_id_from_state != product_id_from_cb:
+        logger.warning(f"Product ID mismatch during delete execution. State: {product_id_from_state}, Callback: {product_id_from_cb}. Using callback ID.")
+        # Potentially re-fetch name if relying on it and state might be stale, but service call will use callback ID.
+        # For now, product_name_from_state will be used for messages.
+
+    success, message_key, deleted_product_name = await product_service.delete_product_by_admin(
+        admin_id=admin_id,
+        product_id=product_id_from_cb, # Use ID from callback as primary
+        lang=lang
+    )
+    
+    # Use the name returned by the service if available (it tries to fetch it), otherwise name from state.
+    display_name = deleted_product_name or product_name_from_state
+
+    final_message = get_text(message_key, lang, product_name=hbold(display_name), product_id=product_id_from_cb)
+    await callback.answer(final_message, show_alert=True) # Show as alert
+
+    await state.clear() # Clear FSM state
+    
+    # Navigate back to product list (page 0)
+    await _send_paginated_products_list(callback, state, user_data, page=0)
+
+
+# --- Product List and View Details Handlers ---
+
+async def _send_paginated_products_list(
+    event: Union[types.Message, types.CallbackQuery],
+    state: FSMContext,
+    user_data: Dict[str, Any],
+    page: int = 0
+):
+    lang = user_data.get("language", "en")
+    product_service = ProductService()
+    user_service = UserService()
+
+    if not await is_admin_user_check(event.from_user.id, user_service):
+        msg = get_text("admin_access_denied", lang)
+        if isinstance(event, types.CallbackQuery): await event.answer(msg, show_alert=True)
+        else: await event.answer(msg)
+        return
+
+    products_on_page_data, total_products = await product_service.get_products_for_admin_list(
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        lang=lang
+    )
+
+    title = get_text("admin_product_list_title", lang)
+
+    if not products_on_page_data and page == 0:
+        empty_text = title + "\n\n" + get_text("admin_no_products_found", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_management", lang, "admin_products_menu")).as_markup()
+        
+        target_message = event.message if isinstance(event, types.CallbackQuery) else event
+        if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+             await target_message.edit_text(empty_text, reply_markup=kb)
+        else:
+             await target_message.answer(empty_text, reply_markup=kb)
+        if isinstance(event, types.CallbackQuery): await event.answer()
+        return
+
+    # The 'name' field from get_products_for_admin_list is already formatted for display.
+    # It includes name, then SKU and cost, e.g., "Product A (SKU: 123) - 10.99 USD"
+    # So, item_text_key="name" should work directly.
+    keyboard = create_paginated_keyboard(
+        items=products_on_page_data,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data=base_callback_data_override or "admin_prod_list_page",
+        item_callback_prefix=item_callback_prefix_override or "admin_prod_view",
+        language=lang,
+        back_callback_key=back_callback_key_override or "back_to_product_management",
+        back_callback_data=back_callback_data_override or "admin_products_menu",
+        total_items_override=total_products,
+        item_text_key="name", 
+        item_id_key="id"
+    )
+    
+    target_message = event.message if isinstance(event, types.CallbackQuery) else event
+    if hasattr(target_message, "edit_text") and isinstance(event, types.CallbackQuery):
+        await target_message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
+    else:
+        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML")
+        
+    if isinstance(event, types.CallbackQuery): await event.answer()
+
+@router.callback_query(F.data == "admin_prod_list:0", StateFilter("*")) # Entry point from product menu
+async def cq_admin_prod_list(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    # Clear any product-specific state if coming from another product operation
+    await state.clear() # Or selectively clear if needed
+    await _send_paginated_products_list(callback, state, user_data, page=0)
+
+@router.callback_query(F.data.startswith("admin_prod_list_page:"), StateFilter("*")) # Pagination
+async def cq_admin_prod_list_paginate(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    try:
+        page = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        page = 0
+    await _send_paginated_products_list(callback, state, user_data, page=page)
+
+
+def _format_product_details_for_admin_view(details: Dict[str, Any], lang: str) -> str:
+    """Helper to format product details for admin view message."""
+    
+    # Determine a primary name for the title, fallback to SKU or ID
+    primary_name = details.get("sku", str(details['id']))
+    if details.get("localizations"):
+        for loc in details["localizations"]:
+            if loc['lang_code'] == lang:
+                primary_name = loc['name']
+                break
+        if primary_name == details.get("sku", str(details['id'])): # if lang not found, try 'en'
+             for loc in details["localizations"]:
+                if loc['lang_code'] == 'en':
+                    primary_name = loc['name']
+                    break
+    
+    view_text = get_text("admin_product_view_title", lang, product_name=hbold(primary_name)) + "\n\n"
+    
+    view_text += f"{hbold(get_text('admin_prod_detail_id', lang))}: {hcode(details['id'])}\n"
+    view_text += f"{hbold(get_text('admin_prod_detail_sku', lang))}: {hcode(details['sku'])}\n"
+    view_text += f"{hbold(get_text('admin_prod_detail_manufacturer', lang))}: {hcode(details['manufacturer_name'])}\n"
+    view_text += f"{hbold(get_text('admin_prod_detail_category', lang))}: {hcode(details['category_name'])}\n"
+    view_text += f"{hbold(get_text('admin_prod_detail_cost', lang))}: {details['cost']}\n" # Already formatted by service
+    view_text += f"{hbold(get_text('admin_prod_detail_variation', lang))}: {hcode(details['variation'])}\n"
+    
+    if details.get('image_url'):
+        view_text += f"{hbold(get_text('admin_prod_detail_image_url', lang))}: {hlink('View Image', details['image_url'])}\n"
+    else:
+        view_text += f"{hbold(get_text('admin_prod_detail_image_url', lang))}: {get_text('not_set', lang)}\n"
+
+    view_text += f"\n{hbold(get_text('admin_prod_detail_localizations_header', lang))}:\n"
+    if details.get("localizations"):
+        for loc in details["localizations"]:
+            lang_code_display = get_text(f"language_name_{loc['lang_code']}", lang, default=loc['lang_code'].upper())
+            desc_display = hitalic(loc.get('description')) if loc.get('description') != get_text('not_set', lang) else get_text('not_set', lang)
+            view_text += f"  <b>{lang_code_display}:</b>\n"
+            view_text += f"    <i>{get_text('name_label', lang)}:</i> {hbold(loc['name'])}\n"
+            view_text += f"    <i>{get_text('description_label', lang)}:</i> {desc_display}\n"
+    else:
+        view_text += f"  {get_text('admin_prod_no_localizations_added_summary', lang)}\n" # Re-use existing key
+
+    view_text += f"\n{hbold(get_text('admin_prod_detail_stock_header', lang))}:\n"
+    if details.get("stock_summary"):
+        for stock_info in details["stock_summary"]:
+            view_text += f"  - {hcode(stock_info['location_name'])}: {stock_info['quantity']} {get_text('units_short', lang)}\n"
+    else:
+        view_text += f"  {get_text('admin_prod_no_stock_data', lang)}\n"
+        
+    return view_text
+
+@router.callback_query(F.data.startswith("admin_prod_view:"), StateFilter("*"))
+async def cq_admin_prod_view(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    try:
+        product_id = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        await callback.answer(get_text("error_occurred", lang), show_alert=True)
+        return await _send_paginated_products_list(callback, state, user_data, page=0) # Go back to list
+
+    product_details_data = await product_service.get_product_details_for_admin(product_id, lang)
+
+    if not product_details_data:
+        await callback.answer(get_text("admin_product_not_found", lang), show_alert=True)
+        return await _send_paginated_products_list(callback, state, user_data, page=0) # Go back to list
+
+    # Store product_id in state in case it's needed by edit/delete from this view
+    await state.update_data(current_product_id_admin_view=product_id) 
+    # Clear other product states if any, or set a specific state for viewing product
+    # For now, not setting a specific state for just viewing, actions will set their own.
+
+    formatted_text = _format_product_details_for_admin_view(product_details_data, lang)
+    
+    from app.keyboards.inline import create_admin_product_view_actions_keyboard
+    keyboard = create_admin_product_view_actions_keyboard(product_id, lang)
+
+    try:
+        await callback.message.edit_text(formatted_text, reply_markup=keyboard, parse_mode="HTML")
+    except Exception as e: # Handle message too long or other errors
+        logger.error(f"Error editing message for product view {product_id}: {e}")
+        # Send as new message if edit fails
+        await callback.message.answer(formatted_text, reply_markup=keyboard, parse_mode="HTML")
+    
+    await callback.answer()
+
+
+# --- Product Creation Confirmation and Execution ---
+
+def _format_product_confirmation_details(product_data: Dict[str, Any], localizations: List[Dict[str, str]], lang: str) -> str:
+    """Helper to format product details for confirmation message."""
+    details_text = get_text("admin_prod_confirm_add_details_title", lang) + "\n\n"
+    
+    details_text += f"{hbold(get_text('product_field_name_manufacturer_id', lang))}: {product_data.get('manufacturer_name', product_data.get('manufacturer_id', get_text('not_set', lang)))}\n"
+    details_text += f"{hbold(get_text('product_field_name_category_id', lang))}: {product_data.get('category_name', product_data.get('category_id', get_text('not_set', lang)))}\n"
+    details_text += f"{hbold(get_text('product_field_name_cost', lang))}: {format_price(product_data.get('cost', 0), lang)}\n" # Assuming format_price can handle Decimal
+    details_text += f"{hbold(get_text('product_field_name_sku', lang))}: {hcode(product_data.get('sku')) if product_data.get('sku') else get_text('not_set', lang)}\n"
+    details_text += f"{hbold(get_text('product_field_name_variation', lang))}: {hcode(product_data.get('variation')) if product_data.get('variation') else get_text('not_set', lang)}\n"
+    details_text += f"{hbold(get_text('product_field_name_image_url', lang))}: {hlink('Link', product_data['image_url']) if product_data.get('image_url') else get_text('not_set', lang)}\n"
+    
+    details_text += f"\n{hbold(get_text('product_field_name_localizations', lang))}:\n"
+    if localizations:
+        for loc in localizations:
+            lang_code_display = get_text(f"language_name_{loc['language_code']}", lang, default=loc['language_code'].upper())
+            desc_display = hitalic(loc.get('description')) if loc.get('description') else get_text('not_set', lang)
+            details_text += f"  - {lang_code_display}:\n"
+            details_text += f"    {get_text('name_label', lang, default='Name')}: {hbold(loc['name'])}\n"
+            details_text += f"    {get_text('description_label', lang, default='Description')}: {desc_display}\n"
+    else:
+        details_text += f"  {get_text('admin_prod_no_localizations_added_summary', lang)}\n"
+        
+    return details_text
+
+@router.callback_query(F.data == "admin_prod_create_confirm_details", StateFilter(AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE))
+async def cq_admin_prod_create_confirm_details(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    state_data = await state.get_data()
+    product_main_data = state_data.get("product_data", {})
+    product_localizations = state_data.get("product_localizations_temp", [])
+
+    if not product_main_data.get("manufacturer_id") or not product_main_data.get("cost") or not product_localizations:
+        await callback.answer(get_text("admin_prod_error_incomplete_data_for_confirmation", lang), show_alert=True)
+        # Send back to product menu as something went wrong
+        mock_cb_for_cancel = types.CallbackQuery(id=callback.id + "_incomplete", from_user=callback.from_user, chat_instance=callback.message.chat.id, message=callback.message, data="admin_prod_add_cancel_to_menu")
+        return await cq_admin_prod_add_cancel_to_menu(mock_cb_for_cancel, state, user_data)
+
+    await state.set_state(AdminProductStates.PRODUCT_CONFIRM_ADD)
+    
+    summary_text = _format_product_confirmation_details(product_main_data, product_localizations, lang)
+    prompt_text = get_text("admin_prod_confirm_add_details_prompt", lang)
+    
+    keyboard = create_confirmation_keyboard(
+        language=lang,
+        yes_callback="admin_prod_create_execute_add",
+        no_callback="admin_prod_add_cancel_to_menu", # Cancels and returns to product menu
+        yes_text_key="confirm_and_add_product",
+        no_text_key="cancel_add_product_short"
+    )
+    
+    full_message = f"{summary_text}\n\n{hbold(prompt_text)}"
+    try:
+        await callback.message.edit_text(full_message, reply_markup=keyboard, parse_mode="HTML")
+    except Exception: # If message too long or other edit error
+        await callback.message.answer(full_message, reply_markup=keyboard, parse_mode="HTML")
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_prod_create_execute_add", StateFilter(AdminProductStates.PRODUCT_CONFIRM_ADD))
+async def cq_admin_prod_create_execute_add(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    admin_id = callback.from_user.id
+    user_service = UserService()
+    product_service = ProductService()
+
+    if not await is_admin_user_check(admin_id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    state_data = await state.get_data()
+    product_main_data = state_data.get("product_data", {})
+    product_localizations = state_data.get("product_localizations_temp", [])
+
+    # Re-check necessary data just in case
+    if not product_main_data.get("manufacturer_id") or "cost" not in product_main_data or not product_localizations:
+        await callback.answer(get_text("admin_prod_error_incomplete_data_for_creation", lang), show_alert=True)
+        await state.clear() # Clear state as it's inconsistent
+        # Send back to product menu
+        prod_menu_text = get_text("admin_product_management_title", lang)
+        prod_menu_kb = create_admin_product_management_menu_keyboard(lang)
+        await callback.message.edit_text(prod_menu_text, reply_markup=prod_menu_kb)
+        return
+
+    created_product, message_key, product_id = await product_service.create_product_with_details(
+        admin_id=admin_id,
+        product_data=product_main_data,
+        localizations_data=product_localizations,
+        lang=lang
+    )
+
+    if created_product and product_id:
+        # Get one of the names for the success message, preferably in admin's language or English
+        product_display_name = product_main_data.get("sku", str(product_id)) # Fallback to SKU or ID
+        for loc in product_localizations:
+            if loc['language_code'] == lang:
+                product_display_name = loc['name']
+                break
+            if loc['language_code'] == 'en' and product_display_name == product_main_data.get("sku", str(product_id)): # Prefer English over SKU if admin lang not found
+                 product_display_name = loc['name']
+        
+        final_message = get_text(message_key, lang, product_name=hcode(product_display_name), product_id=product_id)
+        await callback.answer(final_message, show_alert=True) # Show as alert for more visibility
+    else:
+        # Construct error message if specific details are available (e.g. SKU for duplicate error)
+        error_sku = product_main_data.get('sku', 'N/A')
+        final_message = get_text(message_key, lang, sku=hcode(error_sku))
+        await callback.answer(final_message, show_alert=True)
+
+
+    await state.clear() # Clear FSM state for product creation
+    
+    # Navigate back to product management menu
+    prod_menu_text = get_text("admin_product_management_title", lang)
+    prod_menu_kb = create_admin_product_management_menu_keyboard(lang)
+    try:
+        await callback.message.edit_text(prod_menu_text, reply_markup=prod_menu_kb)
+    except Exception: # If edit fails (e.g. from alert being shown), send new.
+        await callback.message.answer(prod_menu_text, reply_markup=prod_menu_kb)
