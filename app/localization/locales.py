@@ -128,7 +128,6 @@ TEXTS: Dict[str, Dict[Optional[str], str]] = { # Allow Optional[str] for languag
     "unknown_location_name": {"en": "Unknown Location", "ru": "Неизвестная локация", "pl": "Nieznana lokalizacja"},
     "unknown_manufacturer_name": {"en": "Unknown Manufacturer", "ru": "Неизвестный производитель", "pl": "Nieznany producent"},
     "unknown_product_name": {"en": "Unknown Product", "ru": "Неизвестный товар", "pl": "Nieznany produkt"}, # Duplicate, for consistency
-    "product_fallback_name": {"en": "Product", "ru": "Товар", "pl": "Produkt"},
     "cancel_prompt": {"en": "To cancel, type /cancel", "ru": "Для отмены, введите /cancel", "pl": "Aby anulować, wpisz /cancel"},
 
     # Admin Panel General
@@ -265,39 +264,6 @@ TEXTS: Dict[str, Dict[Optional[str], str]] = { # Allow Optional[str] for languag
     "stats_total_orders": {"en": "Total Orders: {count}", "ru": "Всего заказов: {count}", "pl": "Łącznie zamówień: {count}"},
     "stats_pending_orders": {"en": "Pending Approval Orders: {count}", "ru": "Заказы ожидают подтверждения: {count}", "pl": "Zamówienia oczekujące na zatwierdzenie: {count}"},
     "stats_total_products": {"en": "Total Products (approx.): {count}", "ru": "Всего товаров (прибл.): {count}", "pl": "Łącznie produktów (około): {count}"}, # Needs proper count method in ProductService
-
-    # Titles for new admin menu sections (added for this task)
-    "admin_category_management_title": {"en": "🗂️ Category Management", "ru": "🗂️ Управление категориями", "pl": "🗂️ Zarządzanie kategoriami"},
-    "admin_manufacturer_management_title": {"en": "🏭 Manufacturer Management", "ru": "🏭 Управление производителями", "pl": "🏭 Zarządzanie producentami"},
-    "admin_location_management_title": {"en": "📍 Location Management", "ru": "📍 Управление локациями", "pl": "📍 Zarządzanie lokalizacjami"},
-    "admin_stock_management_title": {"en": "📈 Stock Management", "ru": "📈 Управление остатками", "pl": "📈 Zarządzanie stanami magazynowymi"},
-
-    # List titles and related for admin entity views
-    "admin_products_list_title": {"en": "📦 Product List", "ru": "📦 Список Товаров", "pl": "📦 Lista Produktów"},
-    "admin_categories_list_title": {"en": "🗂️ Category List", "ru": "🗂️ Список Категорий", "pl": "🗂️ Lista Kategorii"},
-    "admin_manufacturers_list_title": {"en": "🏭 Manufacturer List", "ru": "🏭 Список Производителей", "pl": "🏭 Lista Producentów"},
-    "admin_locations_list_title": {"en": "📍 Location List", "ru": "📍 Список Локаций", "pl": "📍 Lista Lokacji"},
-    "no_items_found_admin": {"en": "No items found.", "ru": "Элементы не найдены.", "pl": "Nie znaleziono elementów."},
-    "back_to_products_menu": {"en": "◀️ Products Menu", "ru": "◀️ Меню Товаров", "pl": "◀️ Menu Produktów"},
-    "back_to_categories_menu": {"en": "◀️ Categories Menu", "ru": "◀️ Меню Категорий", "pl": "◀️ Menu Kategorii"},
-    "back_to_manufacturers_menu": {"en": "◀️ Manufacturers Menu", "ru": "◀️ Меню Производителей", "pl": "◀️ Menu Producentów"},
-    "back_to_locations_menu": {"en": "◀️ Locations Menu", "ru": "◀️ Меню Локаций", "pl": "◀️ Menu Lokacji"},
-    "not_implemented_yet": {"en": "This feature is not implemented yet.", "ru": "Эта функция еще не реализована.", "pl": "Ta funkcja nie została jeszcze zaimplementowana."},
-
-    # Stock Update Workflow
-    "admin_stock_select_product_title": {"en": "Update Stock: Select Product", "ru": "Обновить Склад: Выберите Товар", "pl": "Aktualizuj Stan: Wybierz Produkt"},
-    "admin_stock_select_location_title": {"en": "Update Stock for {product_name}: Select Location", "ru": "Обновить Склад для {product_name}: Выберите Локацию", "pl": "Aktualizuj Stan dla {product_name}: Wybierz Lokalizację"},
-    "admin_stock_enter_quantity_prompt": {"en": "Enter change (+/-) or new total for {product_name} at {location_name}.\nCurrent: {current_quantity}", "ru": "Введите изменение (+/-) или новое общее кол-во для {product_name} в {location_name}.\nТекущее: {current_quantity}", "pl": "Wprowadź zmianę (+/-) lub nową łączną ilość dla {product_name} w {location_name}.\nObecnie: {current_quantity}"},
-    "admin_stock_updated_success_with_new_qty": {"en": "✅ Stock updated for {product_name} at {location_name}. New quantity: {new_quantity}", "ru": "✅ Остаток обновлен для {product_name} в {location_name}. Новое количество: {new_quantity}", "pl": "✅ Stan zaktualizowany dla {product_name} w {location_name}. Nowa ilość: {new_quantity}"},
-    "admin_stock_update_failed_negative_result": {"en": "❌ Stock update failed: operation would result in negative stock. Current quantity: {current_quantity}", "ru": "❌ Ошибка обновления: операция приведет к отрицательному остатку. Текущее количество: {current_quantity}", "pl": "❌ Aktualizacja nieudana: operacja spowodowałaby ujemny stan. Obecna ilość: {current_quantity}"},
-    "admin_stock_update_failed_general": {"en": "❌ Stock update failed. Current quantity for {product_name} at {location_name}: {current_quantity}", "ru": "❌ Ошибка обновления остатка для {product_name} в {location_name}. Текущее количество: {current_quantity}", "pl": "❌ Aktualizacja stanu nieudana dla {product_name} w {location_name}. Obecna ilość: {current_quantity}"},
-    "admin_stock_update_failed_db_error": {"en": "❌ Stock update failed due to a database error.", "ru": "❌ Ошибка обновления остатка из-за ошибки базы данных.", "pl": "❌ Aktualizacja stanu nie powiodła się z powodu błędu bazy danych."},
-    "invalid_quantity_format": {"en": "❌ Invalid format. Use numbers like +10, -5, or 20 (for new total).", "ru": "❌ Неверный формат. Используйте числа: +10, -5, или 20 (для нового общего кол-ва).", "pl": "❌ Nieprawidłowy format. Użyj liczb: +10, -5, lub 20 (dla nowej łącznej ilości)."},
-    "back_to_stock_menu": {"en": "◀️ Stock Menu", "ru": "◀️ Меню Склада", "pl": "◀️ Menu Stanów"},
-    "admin_stock_product_not_found": {"en": "❌ Product not found for stock update.", "ru": "❌ Товар не найден для обновления склада.", "pl": "❌ Nie znaleziono produktu do aktualizacji stanu."},
-    "admin_stock_location_not_found": {"en": "❌ Location not found for stock update.", "ru": "❌ Локация не найдена для обновления склада.", "pl": "❌ Nie znaleziono lokalizacji do aktualizacji stanu."},
-    "back_to_product_selection_for_stock": {"en": "◀️ Select Product", "ru": "◀️ Выбрать Товар", "pl": "◀️ Wybierz Produkt"},
-    "back_to_location_selection_for_stock": {"en": "◀️ Select Location", "ru": "◀️ Выбрать Локацию", "pl": "◀️ Wybierz Lokalizację"},
 }
 
 def get_text(key: str, language: Optional[str], default: Optional[str] = None) -> str:

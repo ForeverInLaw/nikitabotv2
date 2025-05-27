@@ -5,16 +5,15 @@ Handles CRUD operations for products, categories, manufacturers, and stock.
 """
 
 import logging
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any
 from decimal import Decimal
 from sqlalchemy import select, insert, update, delete, func
-import sqlalchemy as sa # Added import
-from sqlalchemy.orm import joinedload, selectinload # selectinload was already here, but explicitly mentioned
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
 
 
-from app.db.models import Product, ProductLocalization, ProductStock, Location, Manufacturer, Category, Base # Product, Category, Manufacturer, Location, ProductLocalization were already here
+from app.db.models import Product, ProductLocalization, ProductStock, Location, Manufacturer, Category, Base 
 
 logger = logging.getLogger(__name__)
 
@@ -417,59 +416,7 @@ class ProductRepository:
         )
         return result.unique().scalars().all()
 
-    async def get_all_products_paginated(self, offset: int, limit: int) -> Tuple[List[Product], int]:
-        # Query to fetch products with their localizations
-        stmt = (
-            sa.select(Product)
-            .options(selectinload(Product.localizations))
-            .order_by(Product.id)
-            .offset(offset)
-            .limit(limit)
-        )
-        products = await self.session.execute(stmt)
-        products_list = list(products.scalars().unique().all()) # Use unique() to avoid duplicates due to join
 
-        # Query to count total products
-        total_stmt = sa.select(sa.func.count(Product.id))
-        total_products = await self.session.execute(total_stmt)
-        total = total_products.scalar_one()
-        
-        return products_list, total
 
-    async def get_all_categories_paginated(self, offset: int, limit: int) -> Tuple[List[Category], int]:
-        stmt = sa.select(Category).order_by(Category.id).offset(offset).limit(limit)
-        categories = await self.session.execute(stmt)
-        
-        total_stmt = sa.select(sa.func.count(Category.id))
-        total_categories = await self.session.execute(total_stmt)
-        
-        return list(categories.scalars().all()), total_categories.scalar_one()
 
-    async def get_all_manufacturers_paginated(self, offset: int, limit: int) -> Tuple[List[Manufacturer], int]:
-        stmt = sa.select(Manufacturer).order_by(Manufacturer.id).offset(offset).limit(limit)
-        manufacturers = await self.session.execute(stmt)
-        
-        total_stmt = sa.select(sa.func.count(Manufacturer.id))
-        total_manufacturers = await self.session.execute(total_stmt)
-        
-        return list(manufacturers.scalars().all()), total_manufacturers.scalar_one()
 
-    async def get_all_locations_paginated(self, offset: int, limit: int) -> Tuple[List[Location], int]:
-        stmt = sa.select(Location).order_by(Location.id).offset(offset).limit(limit)
-        locations = await self.session.execute(stmt)
-        
-        total_stmt = sa.select(sa.func.count(Location.id))
-        total_locations = await self.session.execute(total_stmt)
-        
-        return list(locations.scalars().all()), total_locations.scalar_one()
-
-    async def get_all_locations_for_product_stock(self, offset: int, limit: int) -> Tuple[List[Location], int]:
-        # This is similar to get_all_locations_paginated for now
-        # Future enhancements could filter locations relevant to a specific product
-        stmt = sa.select(Location).order_by(Location.id).offset(offset).limit(limit)
-        locations = await self.session.execute(stmt)
-        
-        total_stmt = sa.select(sa.func.count(Location.id))
-        total_locations = await self.session.execute(total_stmt)
-        
-        return list(locations.scalars().all()), total_locations.scalar_one()
