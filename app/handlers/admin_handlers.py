@@ -2265,7 +2265,7 @@ async def fsm_admin_prod_cost_received(message: types.Message, user_data: Dict[s
         return
 
     current_product_data = (await state.get_data()).get("product_data", {})
-    current_product_data["cost"] = cost
+    current_product_data["cost"] = str(cost)
     await state.update_data(product_data=current_product_data)
 
     await state.set_state(AdminProductStates.PRODUCT_AWAIT_SKU)

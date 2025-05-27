@@ -449,6 +449,9 @@ class ProductService:
                         logger.warning(f"Admin {admin_id} attempting to create product with non-existent category ID {category_id}.")
                         return None, "admin_error_category_not_found", None
                 
+                # Convert cost back to Decimal before passing to repository
+                product_data["cost"] = Decimal(product_data["cost"])
+                
                 # Create the product
                 # ProductRepository.create_product expects specific args, not a dict
                 new_product = await product_repo.create_product(
