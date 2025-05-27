@@ -6,10 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Location
 # Assuming async_session_maker is correctly defined in app.db.database
-from app.db.database import async_session_maker 
+from app.db.database import async_session 
 
 class LocationRepository:
-    def __init__(self, session_factory=async_session_maker):
+    def __init__(self, session_factory=async_session):
         self.session_factory = session_factory
 
     async def add_location(self, name: str, address: Optional[str] = None) -> Optional[Location]:
