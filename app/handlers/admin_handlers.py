@@ -64,6 +64,11 @@ async def is_admin_user_check(user_id: int, user_service: UserService) -> bool:
 # --- FSM States ---
 class AdminProductStates(StatesGroup): 
     # (Existing states from previous_code - assumed unchanged for this task scope)
+    VIEWING_PRODUCT_LIST = State()
+    VIEWING_CATEGORY_LIST = State()
+    VIEWING_MANUFACTURER_LIST = State()
+    VIEWING_LOCATION_LIST = State()
+
     PRODUCT_AWAIT_MANUFACTURER_ID = State()
     PRODUCT_AWAIT_CATEGORY_ID = State()
     PRODUCT_AWAIT_COST = State()
@@ -94,9 +99,11 @@ class AdminProductStates(StatesGroup):
     LOCATION_SELECT_FOR_EDIT = State()
     LOCATION_SELECT_FOR_DELETE = State()
 
-    STOCK_SELECT_PRODUCT = State() 
-    STOCK_SELECT_LOCATION = State() 
-    STOCK_AWAIT_QUANTITY_CHANGE = State() 
+    STOCK_SELECT_PRODUCT = State()
+    STOCK_SELECT_LOCATION = State()
+    STOCK_AWAIT_QUANTITY_CHANGE = State()
+    # Note: The above states were already defined in the file from a previous task.
+    # This is just confirming their presence as per the prompt.
 
 
 class AdminOrderManagementStates(StatesGroup):
@@ -943,4 +950,1156 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
 # The focus of this update was User Management and setting up Settings/Stats views.
 
 
+# --- Product Management Menu ---
+@router.callback_query(F.data == "admin_products_menu")
+async def cq_admin_products_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear() 
+    await callback.message.edit_text(
+        get_text("admin_product_management_title", lang),
+        reply_markup=create_admin_product_management_menu_keyboard(lang)
+    )
+    await callback.answer()
 
+# --- Category Management Menu ---
+@router.callback_query(F.data == "admin_categories_menu")
+async def cq_admin_categories_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    await callback.message.edit_text(
+        get_text("admin_category_management_title", lang),
+        reply_markup=create_admin_category_management_menu_keyboard(lang)
+    )
+    await callback.answer()
+
+# --- Manufacturer Management Menu ---
+@router.callback_query(F.data == "admin_manufacturers_menu")
+async def cq_admin_manufacturers_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    await callback.message.edit_text(
+        get_text("admin_manufacturer_management_title", lang),
+        reply_markup=create_admin_manufacturer_management_menu_keyboard(lang)
+    )
+    await callback.answer()
+
+# --- Location Management Menu ---
+@router.callback_query(F.data == "admin_locations_menu")
+async def cq_admin_locations_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    await callback.message.edit_text(
+        get_text("admin_location_management_title", lang),
+        reply_markup=create_admin_location_management_menu_keyboard(lang)
+    )
+    await callback.answer()
+
+# --- Stock Management Menu ---
+@router.callback_query(F.data == "admin_stock_menu")
+async def cq_admin_stock_menu(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+    
+    await state.clear()
+    await callback.message.edit_text(
+        get_text("admin_stock_management_title", lang),
+        reply_markup=create_admin_stock_management_menu_keyboard(lang)
+    )
+    await callback.answer()
+
+
+# --- Generic List Display Function (Internal Helper - if needed, or logic in each handler) ---
+# Reusable logic for sending paginated lists can be refactored here if handlers become too repetitive.
+# For now, keeping logic within each specific list handler as per detailed instructions.
+
+# --- Product List Handlers ---
+@router.callback_query(F.data.startswith("admin_prod_list"))
+async def cq_admin_list_products(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = int(callback.data.split(':')[-1])
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_products_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+
+    title = get_text("admin_products_list_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_products_menu", lang, "admin_products_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_prod_list",
+        item_callback_prefix="admin_view_prod",
+        language=lang,
+        back_callback_key="back_to_products_menu",
+        back_callback_data="admin_products_menu",
+        total_items_override=total_count,
+        item_text_key="name", # Service already provides localized name
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.VIEWING_PRODUCT_LIST)
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_view_prod:"))
+async def cq_admin_view_product_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    # item_id = callback.data.split(":")[1] # If needed for a more specific message
+    await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
+
+
+# --- Category List Handlers ---
+@router.callback_query(F.data.startswith("admin_cat_list"))
+async def cq_admin_list_categories(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = int(callback.data.split(':')[-1])
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_categories_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+    
+    title = get_text("admin_categories_list_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_categories_menu", lang, "admin_categories_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_cat_list",
+        item_callback_prefix="admin_view_cat",
+        language=lang,
+        back_callback_key="back_to_categories_menu",
+        back_callback_data="admin_categories_menu",
+        total_items_override=total_count,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.VIEWING_CATEGORY_LIST)
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_view_cat:"))
+async def cq_admin_view_category_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
+
+
+# --- Stock Update Workflow Handlers ---
+
+# Step 1: Select Product for Stock Update (Entry point from Stock Menu)
+# The callback "admin_stock_select_prod:0" is set on the "Update Stock" button in create_admin_stock_management_menu_keyboard
+@router.callback_query(F.data.startswith("admin_stock_select_prod:"))
+async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = 0
+    try:
+        page = int(callback.data.split(':')[-1])
+    except (IndexError, ValueError):
+        logger.warning(f"Invalid page number in callback data: {callback.data}, defaulting to 0.")
+        page = 0
+
+
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_products_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+
+    title = get_text("admin_stock_select_product_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_stock_menu", lang, "admin_stock_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_stock_select_prod", 
+        item_callback_prefix="admin_stock_prod_sel", 
+        language=lang,
+        back_callback_key="back_to_stock_menu", 
+        back_callback_data="admin_stock_menu",
+        total_items_override=total_count,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.STOCK_SELECT_PRODUCT)
+    # Store current page of product list for potential back navigation from location list
+    await state.update_data(current_stock_update_product_list_page=page) 
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+# Step 2: Product Selected, Display Location List (or paginate location list)
+# Callback from product selection: "admin_stock_prod_sel:PRODUCT_ID:PRODUCT_LIST_PAGE"
+# Callback from location pagination: "admin_stock_loc_list_pg:PRODUCT_ID:PRODUCT_LIST_PAGE:LOCATION_LIST_PAGE"
+@router.callback_query(
+    StateFilter(AdminProductStates.STOCK_SELECT_PRODUCT, AdminProductStates.STOCK_SELECT_LOCATION), 
+    F.data.startswith(("admin_stock_prod_sel:", "admin_stock_loc_list_pg:"))
+)
+async def cq_admin_stock_display_locations_for_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService() # For admin check
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id: int
+    product_list_page_for_back: int
+    location_list_page: int = 0 # Default for initial display
+
+    if parts[0] == "admin_stock_prod_sel": # Coming from product selection
+        product_id = int(parts[1])
+        product_list_page_for_back = int(parts[2])
+        # Store product_id and its list page, as we are now focusing on this product
+        await state.update_data(
+            stock_update_product_id=product_id,
+            current_stock_update_product_list_page=product_list_page_for_back 
+        )
+    elif parts[0] == "admin_stock_loc_list_pg": # Coming from location list pagination
+        product_id = int(parts[1])
+        product_list_page_for_back = int(parts[2]) # Page of product list we came from
+        location_list_page = int(parts[3]) # Page of location list to display
+        # product_id should already be in state, this re-confirms/updates product_list_page for back button consistency
+        await state.update_data(current_stock_update_product_list_page=product_list_page_for_back)
+    else: # Should not happen
+        await callback.answer("Invalid action.", show_alert=True)
+        return
+
+    fsm_data = await state.get_data()
+    # Fetch product_name if not already in state, or use stored one
+    product_name_for_title = fsm_data.get("stock_update_product_name")
+    if not product_name_for_title or fsm_data.get("stock_update_product_id") != product_id: # If product_id changed or name not stored
+        product_service_instance = ProductService()
+        temp_product_details = await product_service_instance.get_product_details(product_id, location_id=0, language=lang) # loc_id dummy
+        if not temp_product_details:
+            await callback.answer(get_text("admin_stock_product_not_found", lang), show_alert=True)
+            # Go back to product selection (using stored product list page)
+            prev_prod_list_page = fsm_data.get("current_stock_update_product_list_page",0)
+            mock_cb_data = f"admin_stock_select_prod:{prev_prod_list_page}"
+            await cq_admin_stock_select_product(
+                types.CallbackQuery(id=callback.id, from_user=callback.from_user, chat_instance=callback.chat_instance, message=callback.message, data=mock_cb_data), 
+                user_data, state)
+            return
+        product_name_for_title = temp_product_details.get("name", f"ID {product_id}")
+        await state.update_data(stock_update_product_name=product_name_for_title)
+
+
+    product_service = ProductService()
+    locations, total_locations = await product_service.get_locations_for_product_stock_admin(
+        product_id=product_id, language=lang, limit=ITEMS_PER_PAGE_ADMIN, offset=location_list_page * ITEMS_PER_PAGE_ADMIN
+    )
+    
+    title = get_text("admin_stock_select_location_title", lang).format(product_name=product_name_for_title)
+    if not locations and location_list_page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang) 
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_selection_for_stock", lang, f"admin_stock_select_prod:{product_list_page_for_back}")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=locations,
+        page=location_list_page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data=f"admin_stock_loc_list_pg:{product_id}:{product_list_page_for_back}", 
+        item_callback_prefix=f"admin_stock_loc_sel:{product_id}", 
+        language=lang,
+        back_callback_key="back_to_product_selection_for_stock", 
+        back_callback_data=f"admin_stock_select_prod:{product_list_page_for_back}",
+        total_items_override=total_locations,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.STOCK_SELECT_LOCATION)
+    # Store current page of location list for potential back navigation from quantity prompt
+    await state.update_data(current_stock_update_location_list_page=location_list_page)
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+
+# Step 3: Location Selected, Prompt for Quantity
+# Callback: "admin_stock_loc_sel:PRODUCT_ID:LOCATION_ID:LOCATION_LIST_PAGE"
+@router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_sel:"))
+async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id = int(parts[1])
+    location_id = int(parts[2])
+    location_list_page_this_item_was_on = int(parts[3]) if len(parts) > 3 else 0
+
+    fsm_data = await state.get_data()
+    # Ensure product_id from callback matches FSM, or prioritize callback's product_id
+    if fsm_data.get("stock_update_product_id") != product_id:
+        # This case should ideally not happen if flow is correct
+        logger.warning("Product ID mismatch between callback and FSM state in stock location selection.")
+        await state.update_data(stock_update_product_id=product_id) # Correct it
+
+    product_name = fsm_data.get("stock_update_product_name", f"Product ID {product_id}")
+    # This is the page of the *product list* we eventually want to go back to if user cancels all the way
+    product_list_page_for_loc_list_back = fsm_data.get("current_stock_update_product_list_page", 0)
+
+    product_service = ProductService()
+    location_details = await product_service.get_location_by_id(location_id)
+    if not location_details:
+        await callback.answer(get_text("admin_stock_location_not_found", lang), show_alert=True)
+        # Go back to location selection for this product, using the page this item was on
+        mock_cb_data = f"admin_stock_loc_list_pg:{product_id}:{product_list_page_for_loc_list_back}:{location_list_page_this_item_was_on}"
+        await cq_admin_stock_display_locations_for_product(
+             types.CallbackQuery(id=callback.id, from_user=callback.from_user, chat_instance=callback.chat_instance, message=callback.message, data=mock_cb_data),
+             user_data, state)
+        return
+    location_name = location_details.name
+
+    current_stock_info = await product_service.get_stock_info(product_id, location_id)
+    current_quantity = current_stock_info.get("quantity", 0) if current_stock_info else 0
+
+    prompt_text = get_text("admin_stock_enter_quantity_prompt", lang).format(
+        product_name=hbold(product_name), 
+        location_name=hitalic(location_name),
+        current_quantity=hcode(str(current_quantity))
+    )
+    prompt_text += f"\n\n{hitalic(get_text('cancel_prompt', lang))}"
+    
+    back_to_loc_list_cb = f"admin_stock_loc_list_pg:{product_id}:{product_list_page_for_loc_list_back}:{location_list_page_this_item_was_on}"
+    kb = InlineKeyboardBuilder().row(create_back_button("back_to_location_selection_for_stock", lang, back_to_loc_list_cb)).as_markup()
+
+    await state.set_state(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE)
+    await state.update_data(
+        stock_update_location_id=location_id,
+        stock_update_location_name=location_name,
+        stock_update_current_quantity_val=current_quantity
+    )
+    await callback.message.edit_text(prompt_text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
+
+
+# Step 4: Quantity Received, Update Stock
+@router.message(StateFilter(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE), F.text)
+async def fsm_admin_stock_quantity_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service_check = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service_check):
+        await message.answer(get_text("admin_access_denied", lang))
+        return
+
+    if message.text.lower() == "/cancel":
+        return await universal_cancel_admin_action(message, state, user_data)
+
+    fsm_data = await state.get_data()
+    product_id = fsm_data.get("stock_update_product_id")
+    location_id = fsm_data.get("stock_update_location_id")
+    product_name = fsm_data.get("stock_update_product_name", "N/A")
+    location_name = fsm_data.get("stock_update_location_name", "N/A")
+    current_q_val = fsm_data.get("stock_update_current_quantity_val", 0)
+
+    if not all([product_id, location_id is not None]): # location_id can be 0, so check not None
+        await message.answer(get_text("admin_action_failed_no_context", lang))
+        await state.clear()
+        # Re-invoke main admin panel as a safe exit
+        # Construct a mock message or callback for admin_panel_command or cq_admin_panel_main
+        # For simplicity, just send the text and keyboard
+        await message.answer(get_text("admin_panel_title", lang), reply_markup=create_admin_keyboard(lang))
+        return
+
+    quantity_change_to_apply = validate_stock_change_quantity(message.text, current_q_val)
+
+    if quantity_change_to_apply is None:
+        # Re-prompt with error and original prompt details
+        error_msg = get_text("invalid_quantity_format", lang)
+        prompt_text = get_text("admin_stock_enter_quantity_prompt", lang).format(
+            product_name=hbold(product_name), 
+            location_name=hitalic(location_name),
+            current_quantity=hcode(str(current_q_val))
+        )
+        prompt_text = f"{error_msg}\n\n{prompt_text}\n\n{hitalic(get_text('cancel_prompt', lang))}"
+        
+        product_list_page_for_loc_list_back = fsm_data.get("current_stock_update_product_list_page", 0)
+        location_list_page_this_item_was_on = fsm_data.get("current_stock_update_location_list_page", 0) # Page of location list
+        
+        back_to_loc_list_cb = f"admin_stock_loc_list_pg:{product_id}:{product_list_page_for_loc_list_back}:{location_list_page_this_item_was_on}"
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_location_selection_for_stock", lang, back_to_loc_list_cb)).as_markup()
+        await message.answer(prompt_text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    product_service = ProductService()
+    success, msg_key, new_final_quantity = await product_service.update_stock_by_admin(
+        product_id=product_id,
+        location_id=location_id,
+        quantity_change=quantity_change_to_apply,
+        admin_id=message.from_user.id,
+        language=lang
+    )
+
+    final_message_text = ""
+    if success:
+        final_message_text = get_text(msg_key, lang).format(
+            product_name=product_name, 
+            location_name=location_name, 
+            new_quantity=new_final_quantity
+        )
+    else:
+        final_message_text = get_text(msg_key, lang).format(
+            product_name=product_name, 
+            location_name=location_name,
+            current_quantity=current_q_val 
+        )
+    
+    await message.answer(final_message_text)
+    
+    await state.clear()
+    stock_menu_markup = create_admin_stock_management_menu_keyboard(lang)
+    await message.answer(get_text("admin_stock_management_title", lang), reply_markup=stock_menu_markup)
+
+
+# --- Stock Update Workflow Handlers ---
+
+# Step 1: Select Product for Stock Update (Entry point from Stock Menu)
+# The callback "admin_stock_select_prod:0" is set on the "Update Stock" button in create_admin_stock_management_menu_keyboard
+@router.callback_query(F.data.startswith("admin_stock_select_prod:"))
+async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = 0
+    try:
+        page = int(callback.data.split(':')[-1])
+    except ValueError:
+        logger.warning(f"Invalid page number in callback data: {callback.data}")
+        # Default to page 0 or handle error appropriately
+
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_products_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+
+    title = get_text("admin_stock_select_product_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_stock_menu", lang, "admin_stock_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_stock_select_prod", 
+        item_callback_prefix="admin_stock_prod_sel", # Shortened to avoid long callback data
+        language=lang,
+        back_callback_key="back_to_stock_menu", 
+        back_callback_data="admin_stock_menu",
+        total_items_override=total_count,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.STOCK_SELECT_PRODUCT)
+    await state.update_data(current_stock_product_list_page=page) 
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+# Step 2: Product Selected, Select Location
+# item_callback_prefix from previous step is "admin_stock_prod_sel"
+# It will generate callbacks like "admin_stock_prod_sel:PRODUCT_ID:PRODUCT_LIST_PAGE"
+@router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_PRODUCT), F.data.startswith("admin_stock_prod_sel:"))
+async def cq_admin_stock_product_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService() # For admin check
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id = int(parts[1])
+    product_list_page_for_back = int(parts[2]) if len(parts) > 2 else 0
+    
+    location_list_page = 0
+    # This specific handler is for initial location list. Pagination for locations will use a different callback.
+    # If this callback includes more parts (e.g. admin_stock_prod_sel:PROD_ID:PROD_PAGE:LOC_PAGE for location pagination)
+    # we need a different handler or more complex parsing.
+    # For now, assume this is the first time locations are listed for this product.
+
+    product_service = ProductService()
+    
+    # Fetch product name for the title. Use a lightweight method if available.
+    # get_product_details is heavy; if only name is needed, a specific service method is better.
+    # For now, we will use it as it's available.
+    temp_product_details = await product_service.get_product_details(product_id, location_id=0, language=lang) # location_id=0 is a dummy value
+    if not temp_product_details:
+        await callback.answer(get_text("admin_stock_product_not_found", lang), show_alert=True)
+        # Go back to product selection
+        mock_cb_data = f"admin_stock_select_prod:{product_list_page_for_back}"
+        # Need to call the handler directly as this is not a new callback, but a recovery
+        await cq_admin_stock_select_product(
+            types.CallbackQuery(id=callback.id, from_user=callback.from_user, chat_instance=callback.chat_instance, message=callback.message, data=mock_cb_data), 
+            user_data, state
+        )
+        return
+    product_name_for_title = temp_product_details.get("name", f"ID {product_id}")
+
+    locations, total_locations = await product_service.get_locations_for_product_stock_admin(
+        product_id=product_id, language=lang, limit=ITEMS_PER_PAGE_ADMIN, offset=location_list_page * ITEMS_PER_PAGE_ADMIN
+    )
+    
+    title = get_text("admin_stock_select_location_title", lang).format(product_name=product_name_for_title)
+    if not locations and location_list_page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang) # Could be "no locations found"
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_selection_for_stock", lang, f"admin_stock_select_prod:{product_list_page_for_back}")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    # For location list pagination, base_callback_data needs product_id and product_list_page_for_back
+    # Item selection callback needs product_id and location_id
+    keyboard = create_paginated_keyboard(
+        items=locations,
+        page=location_list_page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data=f"admin_stock_loc_list_pg:{product_id}:{product_list_page_for_back}", # For location pagination
+        item_callback_prefix=f"admin_stock_loc_sel:{product_id}", # For location selection
+        language=lang,
+        back_callback_key="back_to_product_selection_for_stock", # Text for back button
+        back_callback_data=f"admin_stock_select_prod:{product_list_page_for_back}", # CB for back button
+        total_items_override=total_locations,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.STOCK_SELECT_LOCATION)
+    await state.update_data(
+        stock_update_product_id=product_id, 
+        stock_update_product_name=product_name_for_title, # Store for later use
+        current_stock_product_list_page_for_back=product_list_page_for_back # Store for back nav from qty prompt
+    )
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+# Handler for Location List Pagination (distinct from initial product selection)
+@router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_list_pg:"))
+async def cq_admin_stock_location_list_paginate(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService() # For admin check
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id = int(parts[1])
+    product_list_page_for_back = int(parts[2])
+    location_list_page = int(parts[3]) # This is the new page for locations
+
+    product_service = ProductService()
+    fsm_data = await state.get_data()
+    product_name_for_title = fsm_data.get("stock_update_product_name", f"ID {product_id}")
+
+
+    locations, total_locations = await product_service.get_locations_for_product_stock_admin(
+        product_id=product_id, language=lang, limit=ITEMS_PER_PAGE_ADMIN, offset=location_list_page * ITEMS_PER_PAGE_ADMIN
+    )
+    
+    title = get_text("admin_stock_select_location_title", lang).format(product_name=product_name_for_title)
+    # No need for empty check here as this is for pagination, initial empty check is in cq_admin_stock_product_selected
+
+    keyboard = create_paginated_keyboard(
+        items=locations,
+        page=location_list_page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data=f"admin_stock_loc_list_pg:{product_id}:{product_list_page_for_back}", 
+        item_callback_prefix=f"admin_stock_loc_sel:{product_id}", 
+        language=lang,
+        back_callback_key="back_to_product_selection_for_stock", 
+        back_callback_data=f"admin_stock_select_prod:{product_list_page_for_back}",
+        total_items_override=total_locations,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    # State is already STOCK_SELECT_LOCATION, just update message
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+
+# Step 3: Location Selected, Prompt for Quantity
+# item_callback_prefix from previous step is "admin_stock_loc_sel:PRODUCT_ID"
+# It will generate callbacks like "admin_stock_loc_sel:PRODUCT_ID:LOCATION_ID:LOCATION_LIST_PAGE"
+@router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_sel:"))
+async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService() # For admin check
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id = int(parts[1])
+    location_id = int(parts[2])
+    location_list_page_for_back = int(parts[3]) if len(parts) > 3 else 0
+
+    fsm_data = await state.get_data()
+    product_name = fsm_data.get("stock_update_product_name", f"Product ID {product_id}")
+    # product_list_page_for_back is already in FSM as current_stock_product_list_page_for_back
+    # This is needed for the back button from quantity prompt to location list pagination
+    orig_prod_page_for_loc_list_back = fsm_data.get("current_stock_product_list_page_for_back", 0)
+
+
+    product_service = ProductService()
+    location_details = await product_service.get_location_by_id(location_id)
+    if not location_details:
+        await callback.answer(get_text("admin_stock_location_not_found", lang), show_alert=True)
+        # Go back to location selection for this product at its correct page
+        mock_cb_data = f"admin_stock_loc_list_pg:{product_id}:{orig_prod_page_for_loc_list_back}:{location_list_page_for_back}"
+        await cq_admin_stock_location_list_paginate(
+            types.CallbackQuery(id=callback.id, from_user=callback.from_user, chat_instance=callback.chat_instance, message=callback.message, data=mock_cb_data),
+            user_data, state
+        )
+        return
+    location_name = location_details.name
+
+    current_stock_info = await product_service.get_stock_info(product_id, location_id)
+    current_quantity = current_stock_info.get("quantity", 0) if current_stock_info else 0
+
+    prompt_text = get_text("admin_stock_enter_quantity_prompt", lang).format(
+        product_name=hbold(product_name), 
+        location_name=hitalic(location_name),
+        current_quantity=hcode(str(current_quantity))
+    )
+    prompt_text += f"\n\n{hitalic(get_text('cancel_prompt', lang))}"
+    
+    # Back button for quantity prompt: goes to location list for the current product, at 'location_list_page_for_back'
+    # It needs: product_id, product_list_page_for_back (for location list's own back button), and location_list_page_for_back
+    back_to_loc_list_cb = f"admin_stock_loc_list_pg:{product_id}:{orig_prod_page_for_loc_list_back}:{location_list_page_for_back}"
+
+    kb = InlineKeyboardBuilder().row(create_back_button("back_to_location_selection_for_stock", lang, back_to_loc_list_cb)).as_markup()
+
+    await state.set_state(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE)
+    await state.update_data(
+        stock_update_location_id=location_id,
+        stock_update_location_name=location_name, # Store for final message
+        stock_update_current_quantity_val=current_quantity # Store for parsing input
+        # product_id, product_name, current_stock_product_list_page_for_back are already in state
+    )
+    await callback.message.edit_text(prompt_text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
+
+
+# Step 4: Quantity Received, Update Stock
+@router.message(StateFilter(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE), F.text)
+async def fsm_admin_stock_quantity_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    # Admin check not strictly needed here if FSM entry is protected, but good practice
+    user_service_check = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service_check):
+        await message.answer(get_text("admin_access_denied", lang))
+        return
+
+    if message.text.lower() == "/cancel": # Universal cancel handler should pick this up if specific state is included
+        # If specific cancel logic for this state is needed, handle here.
+        # For now, assume universal_cancel_admin_action handles it or this is a fallback.
+        return await universal_cancel_admin_action(message, state, user_data)
+
+
+    fsm_data = await state.get_data()
+    product_id = fsm_data.get("stock_update_product_id")
+    location_id = fsm_data.get("stock_update_location_id")
+    product_name = fsm_data.get("stock_update_product_name", "N/A") # Default if not found
+    location_name = fsm_data.get("stock_update_location_name", "N/A") # Default if not found
+    current_q = fsm_data.get("stock_update_current_quantity_val", 0)
+
+    if not all([product_id, location_id]):
+        await message.answer(get_text("admin_action_failed_no_context", lang))
+        await state.clear()
+        # Consider sending back to a safe menu, e.g., main admin menu
+        await cq_admin_panel_main(types.CallbackQuery(id="dummy",from_user=message.from_user, chat_instance=message.chat.id, message=message, data="admin_panel_main"), state, user_data) # This is a bit hacky
+        return
+
+    # Use the helper to parse quantity
+    quantity_change_to_apply = validate_stock_change_quantity(message.text, current_q)
+
+    if quantity_change_to_apply is None:
+        await message.answer(get_text("invalid_quantity_format", lang))
+        # Re-prompt by re-sending the prompt message (state is still STOCK_AWAIT_QUANTITY_CHANGE)
+        prompt_text = get_text("admin_stock_enter_quantity_prompt", lang).format(
+            product_name=hbold(product_name), 
+            location_name=hitalic(location_name),
+            current_quantity=hcode(str(current_q))
+        )
+        prompt_text += f"\n\n{hitalic(get_text('cancel_prompt', lang))}"
+        
+        # Reconstruct back button for the prompt
+        orig_prod_page_for_loc_list_back = fsm_data.get("current_stock_product_list_page_for_back", 0)
+        # location_list_page_for_back was the page of the location list when a location was selected.
+        # This might not be directly in fsm_data unless explicitly stored before going to quantity prompt.
+        # Let's assume it was stored as 'current_stock_location_list_page_for_qty_back'
+        loc_page_for_back_btn = fsm_data.get("current_stock_location_list_page", 0) # If we stored the location page
+
+        back_to_loc_list_cb = f"admin_stock_loc_list_pg:{product_id}:{orig_prod_page_for_loc_list_back}:{loc_page_for_back_btn}"
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_location_selection_for_stock", lang, back_to_loc_list_cb)).as_markup()
+        await message.answer(prompt_text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    product_service = ProductService()
+    success, msg_key, new_final_quantity = await product_service.update_stock_by_admin(
+        product_id=product_id,
+        location_id=location_id,
+        quantity_change=quantity_change_to_apply, # This is the *change*, not the absolute value
+        admin_id=message.from_user.id,
+        language=lang
+    )
+
+    final_message_text = ""
+    if success:
+        final_message_text = get_text(msg_key, lang).format(
+            product_name=product_name, 
+            location_name=location_name, 
+            new_quantity=new_final_quantity
+        )
+    else:
+        final_message_text = get_text(msg_key, lang).format(
+            product_name=product_name, 
+            location_name=location_name,
+            current_quantity=current_q # For error messages that need current_quantity
+        )
+    
+    await message.answer(final_message_text)
+    
+    # Clear state and go back to stock menu for simplicity
+    await state.clear()
+    stock_menu_markup = create_admin_stock_management_menu_keyboard(lang)
+    await message.answer(get_text("admin_stock_management_title", lang), reply_markup=stock_menu_markup)
+
+
+# --- Stock Update Workflow Handlers ---
+
+# Step 1: Select Product for Stock Update (Entry point from Stock Menu)
+@router.callback_query(F.data.startswith("admin_stock_select_prod:"))
+async def cq_admin_stock_select_product(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = int(callback.data.split(':')[-1])
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_products_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+
+    title = get_text("admin_stock_select_product_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_stock_menu", lang, "admin_stock_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_stock_select_prod", # For pagination of product list
+        item_callback_prefix="admin_stock_prod_selected", # Prefix for item selection
+        language=lang,
+        back_callback_key="back_to_stock_menu", # Text for back button
+        back_callback_data="admin_stock_menu",   # Callback for back button
+        total_items_override=total_count,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.STOCK_SELECT_PRODUCT)
+    await state.update_data(current_stock_product_list_page=page) # Store current product page for potential back navigation
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+
+# Step 2: Product Selected, Select Location
+@router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_PRODUCT), F.data.startswith("admin_stock_prod_selected:"))
+async def cq_admin_stock_product_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id = int(parts[1])
+    # The page number in this callback (parts[2]) is the page of the *product list* this item was on.
+    # We need it for the back button from the location list.
+    product_list_page_for_back = int(parts[2]) if len(parts) > 2 else 0
+    
+    # Location list page, default to 0 if not specified (e.g. coming here for the first time for this product)
+    location_list_page = 0 
+    # If the callback is from location list pagination, it will have more parts
+    # e.g. admin_stock_prod_selected:PRODUCT_ID:LOCATION_PAGE_NUM:ORIG_PROD_PAGE
+    if len(parts) > 3 and parts[0] == "admin_stock_prod_selected_locpage": # custom prefix for this scenario
+        product_id = int(parts[1]) # already have
+        location_list_page = int(parts[2])
+        product_list_page_for_back = int(parts[3])
+
+
+    product_service = ProductService()
+    
+    # Fetch product name for the title
+    # Using get_product_details, but only need name. A lighter service method might be better in future.
+    product_details = await product_service.get_product_details(product_id, location_id=0, language=lang) # loc_id 0 is dummy
+    if not product_details:
+        await callback.answer(get_text("admin_stock_product_not_found", lang), show_alert=True)
+        # Go back to product selection
+        mock_cb_data = f"admin_stock_select_prod:{product_list_page_for_back}"
+        await cq_admin_stock_select_product(types.CallbackQuery(id=callback.id, from_user=callback.from_user, chat_instance=callback.chat_instance, message=callback.message, data=mock_cb_data), user_data, state)
+        return
+
+    product_name = product_details.get("name", f"ID: {product_id}")
+
+    locations, total_count = await product_service.get_locations_for_product_stock_admin(
+        product_id=product_id,
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=location_list_page * ITEMS_PER_PAGE_ADMIN
+    )
+    
+    title = get_text("admin_stock_select_location_title", lang).format(product_name=product_name)
+    if not locations and location_list_page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang) # Could be a more specific "no locations"
+        # Back button should go to product list page
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_product_selection_for_stock", lang, f"admin_stock_select_prod:{product_list_page_for_back}")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    # For location list pagination, we need product_id and original product_list_page for back button
+    # The item_callback_prefix will carry product_id. The base_callback_data for pagination needs product_id and product_list_page
+    base_cb_data_for_loc_pagination = f"admin_stock_prod_selected_locpage:{product_id}:{product_list_page_for_back}" # page num for loc list will be appended
+
+    keyboard = create_paginated_keyboard(
+        items=locations,
+        page=location_list_page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data=base_cb_data_for_loc_pagination, 
+        item_callback_prefix=f"admin_stock_loc_selected:{product_id}", # Item click includes product_id
+        language=lang,
+        back_callback_key="back_to_product_selection_for_stock",
+        back_callback_data=f"admin_stock_select_prod:{product_list_page_for_back}",
+        total_items_override=total_count,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.STOCK_SELECT_LOCATION)
+    await state.update_data(
+        stock_update_product_id=product_id, 
+        stock_update_product_name=product_name,
+        current_stock_location_list_page=location_list_page,
+        # product_list_page_for_back is implicitly handled by back_callback_data
+    )
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+
+# Step 3: Location Selected, Prompt for Quantity
+@router.callback_query(StateFilter(AdminProductStates.STOCK_SELECT_LOCATION), F.data.startswith("admin_stock_loc_selected:"))
+async def cq_admin_stock_location_selected(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    parts = callback.data.split(':')
+    product_id = int(parts[1])
+    location_id = int(parts[2])
+    # The page number here (parts[3]) is the page of the *location list* this item was on.
+    location_list_page_for_back = int(parts[3]) if len(parts) > 3 else 0
+
+
+    fsm_data = await state.get_data()
+    product_name = fsm_data.get("stock_update_product_name", f"ID: {product_id}")
+    
+    product_service = ProductService()
+    location_details = await product_service.get_location_by_id(location_id)
+    if not location_details:
+        await callback.answer(get_text("admin_stock_location_not_found", lang), show_alert=True)
+        # Go back to location selection for that product
+        # Need original product_list_page from fsm_data if we stored it, or from previous state's back button.
+        # For simplicity, we'll assume product_list_page_for_back was correctly set for the location list's back button
+        # This is complex, for now just go back to location list page 0 for this product.
+        # A more robust solution would pass product_list_page_for_back through state or callback data.
+        # The cq_admin_stock_product_selected handler's back_callback_data for location list pagination already points to the correct product list page.
+        # We need to use current_stock_location_list_page from FSM for this.
+        
+        # This callback needs to know the original product list page to construct the back button for location list
+        # Let's assume current_stock_product_list_page is in FSM from cq_admin_stock_select_product
+        orig_prod_page = fsm_data.get("current_stock_product_list_page", 0)
+
+        mock_cb_data = f"admin_stock_prod_selected:{product_id}:{orig_prod_page}" # This takes it to location list for product_id, from prod list page orig_prod_page
+        await cq_admin_stock_product_selected(types.CallbackQuery(id=callback.id, from_user=callback.from_user, chat_instance=callback.chat_instance, message=callback.message, data=mock_cb_data), user_data, state)
+
+        return
+
+    location_name = location_details.name
+
+    current_stock_info = await product_service.get_stock_info(product_id, location_id)
+    current_quantity = current_stock_info.get("quantity", 0) if current_stock_info else 0
+
+    prompt_text = get_text("admin_stock_enter_quantity_prompt", lang).format(
+        product_name=hbold(product_name), 
+        location_name=hitalic(location_name),
+        current_quantity=hcode(str(current_quantity))
+    )
+    prompt_text += f"\n\n{hitalic(get_text('cancel_prompt', lang))}"
+
+    # Back button should go to location list for the current product, at the correct page
+    # It needs: product_id, location_list_page_for_back, and the original product_list_page for *that* back button
+    orig_prod_page_for_loc_list_back = fsm_data.get("current_stock_product_list_page", 0)
+    
+    # The callback for selecting a location from the paginated list of locations.
+    # This needs to go to the location list for the product `product_id`, 
+    # using `location_list_page_for_back` as the page for that list.
+    # The back button from *that* location list then needs `orig_prod_page_for_loc_list_back`.
+    # So, the callback would be something like: admin_stock_prod_selected_locpage:PRODUCT_ID:LOCATION_PAGE:ORIG_PROD_PAGE
+    back_to_loc_list_cb = f"admin_stock_prod_selected_locpage:{product_id}:{location_list_page_for_back}:{orig_prod_page_for_loc_list_back}"
+
+    kb = InlineKeyboardBuilder().row(create_back_button("back_to_location_selection_for_stock", lang, back_to_loc_list_cb)).as_markup()
+
+    await state.set_state(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE)
+    await state.update_data(
+        stock_update_location_id=location_id,
+        stock_update_location_name=location_name,
+        stock_update_current_quantity_val=current_quantity,
+        # product_id and product_name already in state
+        # location_list_page_for_back is stored for the back button from quantity prompt
+        current_stock_qty_prompt_loc_page = location_list_page_for_back 
+    )
+    await callback.message.edit_text(prompt_text, reply_markup=kb, parse_mode="HTML")
+    await callback.answer()
+
+
+# Step 4: Quantity Received, Update Stock
+@router.message(StateFilter(AdminProductStates.STOCK_AWAIT_QUANTITY_CHANGE), F.text)
+async def fsm_admin_stock_quantity_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        # This check is more for direct state access, admin status assumed by FSM entry
+        await message.answer(get_text("admin_access_denied", lang))
+        return
+
+    if message.text.lower() == "/cancel":
+        return await universal_cancel_admin_action(message, state, user_data)
+
+    fsm_data = await state.get_data()
+    product_id = fsm_data.get("stock_update_product_id")
+    location_id = fsm_data.get("stock_update_location_id")
+    product_name = fsm_data.get("stock_update_product_name", "N/A")
+    location_name = fsm_data.get("stock_update_location_name", "N/A")
+    current_quantity_val = fsm_data.get("stock_update_current_quantity_val", 0)
+
+    if not all([product_id, location_id]):
+        await message.answer(get_text("admin_action_failed_no_context", lang))
+        await state.clear()
+        # Go back to main admin panel or stock menu
+        await admin_panel_command(message, state, user_data) # Assuming this is a valid way to restart
+        return
+
+    parsed_quantity_change = validate_stock_change_quantity(message.text, current_quantity_val)
+
+    if parsed_quantity_change is None:
+        await message.answer(get_text("invalid_quantity_format", lang))
+        # Re-prompt (the state is still STOCK_AWAIT_QUANTITY_CHANGE)
+        # Optionally, resend the prompt message if it got cleared or for clarity
+        prompt_text = get_text("admin_stock_enter_quantity_prompt", lang).format(
+            product_name=hbold(product_name), 
+            location_name=hitalic(location_name),
+            current_quantity=hcode(str(current_quantity_val))
+        )
+        prompt_text += f"\n\n{hitalic(get_text('cancel_prompt', lang))}"
+        
+        orig_prod_page_for_loc_list_back = fsm_data.get("current_stock_product_list_page", 0)
+        location_list_page_for_back = fsm_data.get("current_stock_qty_prompt_loc_page",0)
+        back_to_loc_list_cb = f"admin_stock_prod_selected_locpage:{product_id}:{location_list_page_for_back}:{orig_prod_page_for_loc_list_back}"
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_location_selection_for_stock", lang, back_to_loc_list_cb)).as_markup()
+
+        await message.answer(prompt_text, reply_markup=kb, parse_mode="HTML")
+        return
+
+    product_service = ProductService()
+    success, msg_key, new_quantity = await product_service.update_stock_by_admin(
+        product_id=product_id,
+        location_id=location_id,
+        quantity_change=parsed_quantity_change,
+        admin_id=message.from_user.id,
+        language=lang
+    )
+
+    response_text = ""
+    if success:
+        response_text = get_text(msg_key, lang).format(
+            product_name=product_name, 
+            location_name=location_name, 
+            new_quantity=new_quantity
+        )
+    else:
+        response_text = get_text(msg_key, lang).format(
+            product_name=product_name, 
+            location_name=location_name,
+            current_quantity=current_quantity_val # For error messages that need it
+        )
+    
+    await message.answer(response_text)
+    
+    # Clear state and go back to stock menu (or product selection for stock)
+    await state.clear()
+    # For simplicity, go back to the main stock menu
+    stock_menu_markup = create_admin_stock_management_menu_keyboard(lang)
+    await message.answer(get_text("admin_stock_management_title", lang), reply_markup=stock_menu_markup)
+
+
+# --- Manufacturer List Handlers ---
+@router.callback_query(F.data.startswith("admin_mfg_list"))
+async def cq_admin_list_manufacturers(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = int(callback.data.split(':')[-1])
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_manufacturers_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+
+    title = get_text("admin_manufacturers_list_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_manufacturers_menu", lang, "admin_manufacturers_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_mfg_list",
+        item_callback_prefix="admin_view_mfg",
+        language=lang,
+        back_callback_key="back_to_manufacturers_menu",
+        back_callback_data="admin_manufacturers_menu",
+        total_items_override=total_count,
+        item_text_key="name",
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.VIEWING_MANUFACTURER_LIST)
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_view_mfg:"))
+async def cq_admin_view_manufacturer_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
+
+
+# --- Location List Handlers ---
+@router.callback_query(F.data.startswith("admin_loc_list"))
+async def cq_admin_list_locations(callback: types.CallbackQuery, user_data: Dict[str, Any], state: FSMContext):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    page = int(callback.data.split(':')[-1])
+    product_service = ProductService()
+
+    items, total_count = await product_service.list_all_locations_paginated(
+        language=lang,
+        limit=ITEMS_PER_PAGE_ADMIN,
+        offset=page * ITEMS_PER_PAGE_ADMIN
+    )
+
+    title = get_text("admin_locations_list_title", lang)
+    if not items and page == 0:
+        empty_text = title + "\n\n" + get_text("no_items_found_admin", lang)
+        kb = InlineKeyboardBuilder().row(create_back_button("back_to_locations_menu", lang, "admin_locations_menu")).as_markup()
+        await callback.message.edit_text(empty_text, reply_markup=kb)
+        await callback.answer()
+        return
+
+    keyboard = create_paginated_keyboard(
+        items=items,
+        page=page,
+        items_per_page=ITEMS_PER_PAGE_ADMIN,
+        base_callback_data="admin_loc_list",
+        item_callback_prefix="admin_view_loc",
+        language=lang,
+        back_callback_key="back_to_locations_menu",
+        back_callback_data="admin_locations_menu",
+        total_items_override=total_count,
+        item_text_key="name", # As per instruction, can be enhanced later
+        item_id_key="id"
+    )
+    await state.set_state(AdminProductStates.VIEWING_LOCATION_LIST)
+    await callback.message.edit_text(title, reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_view_loc:"))
+async def cq_admin_view_location_noop(callback: types.CallbackQuery, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    await callback.answer(get_text("not_implemented_yet", lang), show_alert=True)
