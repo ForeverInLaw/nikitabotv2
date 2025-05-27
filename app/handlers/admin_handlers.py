@@ -2166,6 +2166,33 @@ async def cq_admin_prod_create_page_category(callback: types.CallbackQuery, stat
     await _send_paginated_entities_for_selection(callback, state, user_data, entity_type="category", page=page)
 
 
+# Handler for text input when category selection is expected (product creation)
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID), F.text)
+async def fsm_admin_prod_category_text_input_received(message: types.Message, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        await message.answer(get_text("admin_access_denied", lang))
+        return
+
+    await message.answer(get_text("admin_prod_use_keyboard_for_category", lang))
+    
+    # Re-send the category selection interface
+    state_data = await state.get_data()
+    current_page = state_data.get("current_category_selection_page", 0)
+    
+    await _send_paginated_entities_for_selection(
+        event=message, # Pass the message object
+        state=state,
+        user_data=user_data,
+        entity_type="category",
+        page=current_page,
+        item_callback_prefix_override="admin_prod_create_select_category",
+        base_pagination_cb_override="admin_prod_create_page_category"
+    )
+
+
 # Handler for selecting manufacturer during product creation
 @router.callback_query(F.data.startswith("admin_prod_create_select_manufacturer:"), StateFilter(AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID))
 async def cq_admin_prod_create_select_manufacturer(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
@@ -2553,6 +2580,196 @@ async def fsm_admin_prod_loc_desc_received(message: types.Message, user_data: Di
 
     else: # Part of NEW product creation flow
         product_localizations_temp = state_data.get("product_localizations_temp", [])
+        # Update if lang_code already in temp list (e.g. user went back and re-added for same lang)
+        found_idx = -1
+        for i, loc in enumerate(product_localizations_temp):
+            if loc["language_code"] == active_loc_lang_code:
+                found_idx = i
+                break
+        if found_idx != -1:
+            product_localizations_temp[found_idx] = {"language_code": active_loc_lang_code, "name": current_loc_name, "description": loc_desc}
+        else:
+            product_localizations_temp.append({"language_code": active_loc_lang_code, "name": current_loc_name, "description": loc_desc})
+        
+        await state.update_data(product_localizations_temp=product_localizations_temp)
+        await state.update_data(current_localization_lang=None, current_localization_name_temp=None) # Clear single loc context
+        
+        lang_display_name = get_text(f"language_name_{active_loc_lang_code}", lang, default=active_loc_lang_code.upper())
+        await message.answer(get_text("admin_prod_loc_added_ask_more", lang, lang_name=lang_display_name))
+        await _admin_prod_create_ask_localization_lang(message, state, user_data) # Loop for new product
+
+
+# --- Category Add Handlers ---
+@router.callback_query(F.data == "admin_cat_add_start", StateFilter("*"))
+async def cq_admin_cat_add_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    await state.set_state(AdminProductStates.CATEGORY_AWAIT_NAME)
+    
+    prompt_text = get_text("admin_cat_enter_name_prompt", lang, default="Please enter the name for the new category:")
+    cancel_info = get_text("cancel_prompt", lang)
+    
+    full_prompt = f"{prompt_text}\n\n{hitalic(cancel_info)}"
+    
+    try:
+        await callback.message.edit_text(full_prompt, parse_mode="HTML", reply_markup=None) # Remove previous keyboard
+    except Exception as e:
+        logger.info(f"Editing message for admin_cat_add_start failed, sending new: {e}")
+        await callback.message.answer(full_prompt, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        
+    await callback.answer()
+
+@router.message(StateFilter(AdminProductStates.CATEGORY_AWAIT_NAME), F.text)
+async def fsm_admin_category_name_received(message: types.Message, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        await message.answer(get_text("admin_action_cancelled", lang), reply_markup=types.ReplyKeyboardRemove())
+        await state.clear()
+        # Simulate callback to cq_admin_categories_menu to show the menu
+        # Create a mock CallbackQuery object or directly call the menu sending logic
+        # For simplicity, directly sending the menu as a new message:
+        title_text = get_text("admin_category_management_title", lang, default="Category Management")
+        keyboard = create_admin_category_management_menu_keyboard(lang)
+        await message.answer(title_text, reply_markup=keyboard, parse_mode="HTML")
+        return
+
+    sanitized_name = sanitize_input(message.text)
+
+    if not sanitized_name:
+        error_msg = get_text("admin_cat_name_empty_error", lang, default="Category name cannot be empty. Please try again.")
+        prompt_text = get_text("admin_cat_enter_name_prompt", lang, default="Please enter the name for the new category:")
+        cancel_info = get_text("cancel_prompt", lang)
+        full_reprompt = f"{error_msg}\n\n{prompt_text}\n\n{hitalic(cancel_info)}"
+        await message.answer(full_reprompt, parse_mode="HTML")
+        return
+
+    product_service = ProductService()
+    created_category, message_key, category_id = await product_service.create_category(name=sanitized_name, lang=lang)
+
+    if created_category and category_id is not None:
+        success_msg = get_text(message_key, lang, name=hcode(created_category['name']), id=category_id)
+        await message.answer(success_msg, parse_mode="HTML")
+    else:
+        # message_key here would be an error string like "admin_category_already_exists_error"
+        error_msg = get_text(message_key, lang, name=hcode(sanitized_name))
+        await message.answer(error_msg, parse_mode="HTML")
+
+    await state.clear()
+    
+    # Show category management menu again
+    title_text = get_text("admin_category_management_title", lang, default="Category Management")
+    keyboard = create_admin_category_management_menu_keyboard(lang)
+    await message.answer(title_text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# --- Product Localization Edit/Add Handlers (for existing product) ---
+
+@router.callback_query(F.data.startswith("admin_prod_edit_locs_menu:"), StateFilter("*")) # Accessible from product edit options
+async def cq_admin_prod_edit_locs_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+        # Update if lang_code already in temp list (e.g. user went back and re-added for same lang)
+        found_idx = -1
+        for i, loc in enumerate(product_localizations_temp):
+            if loc["language_code"] == active_loc_lang_code:
+                found_idx = i
+                break
+        if found_idx != -1:
+            product_localizations_temp[found_idx] = {"language_code": active_loc_lang_code, "name": current_loc_name, "description": loc_desc}
+        else:
+            product_localizations_temp.append({"language_code": active_loc_lang_code, "name": current_loc_name, "description": loc_desc})
+        
+        await state.update_data(product_localizations_temp=product_localizations_temp)
+        await state.update_data(current_localization_lang=None, current_localization_name_temp=None) # Clear single loc context
+        
+        lang_display_name = get_text(f"language_name_{active_loc_lang_code}", lang, default=active_loc_lang_code.upper())
+        await message.answer(get_text("admin_prod_loc_added_ask_more", lang, lang_name=lang_display_name))
+        await _admin_prod_create_ask_localization_lang(message, state, user_data) # Loop for new product
+
+
+# --- Category Add Handlers ---
+@router.callback_query(F.data == "admin_cat_add_start", StateFilter("*"))
+async def cq_admin_cat_add_start(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+    if not await is_admin_user_check(callback.from_user.id, user_service):
+        return await callback.answer(get_text("admin_access_denied", lang), show_alert=True)
+
+    await state.set_state(AdminProductStates.CATEGORY_AWAIT_NAME)
+    
+    prompt_text = get_text("admin_cat_enter_name_prompt", lang, default="Please enter the name for the new category:")
+    cancel_info = get_text("cancel_prompt", lang)
+    
+    full_prompt = f"{prompt_text}\n\n{hitalic(cancel_info)}"
+    
+    try:
+        await callback.message.edit_text(full_prompt, parse_mode="HTML", reply_markup=None) # Remove previous keyboard
+    except Exception as e:
+        logger.info(f"Editing message for admin_cat_add_start failed, sending new: {e}")
+        await callback.message.answer(full_prompt, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        
+    await callback.answer()
+
+@router.message(StateFilter(AdminProductStates.CATEGORY_AWAIT_NAME), F.text)
+async def fsm_admin_category_name_received(message: types.Message, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
+    user_service = UserService()
+
+    if not await is_admin_user_check(message.from_user.id, user_service):
+        return await message.answer(get_text("admin_access_denied", lang))
+
+    if message.text.lower() == "/cancel":
+        await message.answer(get_text("admin_action_cancelled", lang), reply_markup=types.ReplyKeyboardRemove())
+        await state.clear()
+        # Simulate callback to cq_admin_categories_menu to show the menu
+        # Create a mock CallbackQuery object or directly call the menu sending logic
+        # For simplicity, directly sending the menu as a new message:
+        title_text = get_text("admin_category_management_title", lang, default="Category Management")
+        keyboard = create_admin_category_management_menu_keyboard(lang)
+        await message.answer(title_text, reply_markup=keyboard, parse_mode="HTML")
+        return
+
+    sanitized_name = sanitize_input(message.text)
+
+    if not sanitized_name:
+        error_msg = get_text("admin_cat_name_empty_error", lang, default="Category name cannot be empty. Please try again.")
+        prompt_text = get_text("admin_cat_enter_name_prompt", lang, default="Please enter the name for the new category:")
+        cancel_info = get_text("cancel_prompt", lang)
+        full_reprompt = f"{error_msg}\n\n{prompt_text}\n\n{hitalic(cancel_info)}"
+        await message.answer(full_reprompt, parse_mode="HTML")
+        return
+
+    product_service = ProductService()
+    created_category, message_key, category_id = await product_service.create_category(name=sanitized_name, lang=lang)
+
+    if created_category and category_id is not None:
+        success_msg = get_text(message_key, lang, name=hcode(created_category['name']), id=category_id)
+        await message.answer(success_msg, parse_mode="HTML")
+    else:
+        # message_key here would be an error string like "admin_category_already_exists_error"
+        error_msg = get_text(message_key, lang, name=hcode(sanitized_name))
+        await message.answer(error_msg, parse_mode="HTML")
+
+    await state.clear()
+    
+    # Show category management menu again
+    title_text = get_text("admin_category_management_title", lang, default="Category Management")
+    keyboard = create_admin_category_management_menu_keyboard(lang)
+    await message.answer(title_text, reply_markup=keyboard, parse_mode="HTML")
+
+
+# --- Product Localization Edit/Add Handlers (for existing product) ---
+
+@router.callback_query(F.data.startswith("admin_prod_edit_locs_menu:"), StateFilter("*")) # Accessible from product edit options
+async def cq_admin_prod_edit_locs_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
+    lang = user_data.get("language", "en")
         # Update if lang_code already in temp list (e.g. user went back and re-added for same lang)
         found_idx = -1
         for i, loc in enumerate(product_localizations_temp):

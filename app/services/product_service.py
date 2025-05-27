@@ -359,6 +359,57 @@ class ProductService:
                 await session.rollback()
             return None, "admin_mfg_create_failed_db_error", None # Generic DB error for unexpected issues
 
+    async def create_category(self, name: str, lang: str = "en") -> Tuple[Optional[Dict[str, Any]], str, Optional[int]]:
+        """
+        Creates a new category.
+        Returns a tuple: (created_category_dict, message_key, category_id).
+        """
+        try:
+            async with get_session() as session:
+                product_repo = ProductRepository(session)
+                
+                created_category: Optional[Category] = await product_repo.create_category(name=name)
+                
+                if created_category:
+                    await session.commit()
+                    logger.info(f"Category '{created_category.name}' (ID: {created_category.id}) created successfully.")
+                    return (
+                        {"id": created_category.id, "name": created_category.name},
+                        "admin_category_created_successfully",
+                        created_category.id
+                    )
+                else:
+                    # This path is taken if repo returns None.
+                    # The repo logs IntegrityError vs other SQLAlchemyError.
+                    # We need to infer which message to return.
+                    # A more robust way would be for the repo to return a specific error type or code.
+                    # For now, assume 'duplicate' if no exception bubbled from repo and it returned None.
+                    # This relies on the repo's logging to distinguish.
+                    await session.rollback() 
+                    # Attempt to check if it was a duplicate by trying to fetch it
+                    # This is a workaround; ideally, the repo would give a clearer signal.
+                    existing_category = await product_repo.get_category_by_name(name)
+                    if existing_category:
+                        logger.warning(f"Category creation failed for name '{name}', duplicate detected post-attempt.")
+                        return None, "admin_category_already_exists_error", None
+                    else:
+                        logger.warning(f"Category creation failed for name '{name}', repository returned None but not found as duplicate.")
+                        return None, "admin_category_create_failed_db_error", None # Generic DB error if not clearly a duplicate
+                    
+        except SQLAlchemyError as e: # Catch SQLAlchemy errors that might occur if repo re-raises or if session ops fail
+            if 'session' in locals() and hasattr(session, 'is_active') and session.is_active:
+                await session.rollback()
+            logger.error(f"Database error during category creation for name '{name}': {e}", exc_info=True)
+            # Check if it's an integrity error (duplicate) specifically, if possible from `e`
+            if isinstance(e, IntegrityError): # More specific check
+                 return None, "admin_category_already_exists_error", None
+            return None, "admin_category_create_failed_db_error", None
+        except Exception as e: # Catch any other unexpected errors
+            if 'session' in locals() and hasattr(session, 'is_active') and session.is_active:
+                await session.rollback()
+            logger.error(f"Unexpected error during category creation for name '{name}': {e}", exc_info=True)
+            return None, "admin_category_create_failed_unexpected", None
+
     async def update_manufacturer_details(
         self, manufacturer_id: int, name: str, lang: str = "en"
     ) -> Tuple[bool, str, Optional[Dict[str, Any]]]:

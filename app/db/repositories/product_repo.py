@@ -216,12 +216,31 @@ class ProductRepository:
 
 
     # --- Category Methods ---
-    async def create_category(self, name: str) -> Category:
-        """Create a new category."""
-        category = Category(name=name)
-        self.session.add(category)
-        await self.session.flush()
-        return category
+    async def create_category(self, name: str) -> Optional[Category]:
+        """
+        Create a new category if one with the same name (case-insensitive) doesn't already exist.
+        Returns the Category object if successful, None otherwise.
+        """
+        try:
+            # Case-insensitive check for existing category (optional, depends on DB collation and explicit checks)
+            # For this implementation, we rely on the unique constraint in the database for Category.name
+            # and handle the IntegrityError if a duplicate occurs.
+
+            new_category = Category(name=name)
+            self.session.add(new_category)
+            await self.session.flush()  # Persist to get ID and trigger unique constraint if duplicate
+            await self.session.refresh(new_category) # Ensure all attributes are loaded
+            logger.info(f"Category '{name}' created successfully with ID {new_category.id}.")
+            return new_category
+        except IntegrityError:
+            # This block will be executed if a unique constraint violation occurs (e.g., duplicate name)
+            await self.session.rollback() # Important to rollback the session
+            logger.warning(f"IntegrityError: Category with name '{name}' already exists. Creation aborted.")
+            return None
+        except SQLAlchemyError as e:
+            await self.session.rollback() # Rollback on other SQLAlchemy errors
+            logger.error(f"SQLAlchemyError while creating category '{name}': {e}", exc_info=True)
+            return None
 
     async def get_category_by_id(self, category_id: int) -> Optional[Category]:
         """Get category by ID."""

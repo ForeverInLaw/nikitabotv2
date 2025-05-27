@@ -287,7 +287,7 @@ TEXTS: Dict[str, Dict[Optional[str], str]] = { # Allow Optional[str] for languag
 
     # Product Creation Specific
     "admin_prod_enter_manufacturer_id": {"en": "Select Manufacturer for the new product:", "ru": "Выберите производителя для нового товара:", "pl": "Wybierz producenta dla nowego produktu:"},
-    "admin_prod_enter_category_id": {"en": "Select Category for the new product (optional):", "ru": "Выберите категорию для нового товара (необязательно):", "pl": "Wybierz kategorię dla nowego produktu (opcjonalnie):"},
+    "admin_prod_enter_category_id": {"en": "Select Category for the new product:", "ru": "Выберите категорию для нового товара:", "pl": "Wybierz kategorię dla nowego produktu:"},
     "admin_prod_category_skip_instruction": {"en": "You can skip category selection by clicking the 'Skip' button if available, or if no categories are listed.", "ru": "Вы можете пропустить выбор категории, нажав кнопку 'Пропустить', если доступна, или если категории не отображаются.", "pl": "Możesz pominąć wybór kategorii, klikając przycisk 'Pomiń', jeśli jest dostępny, lub jeśli żadne kategorie nie są wyświetlane."},
     "admin_no_manufacturers_found_for_product_creation": {"en": "No manufacturers found. Cannot create a product without a manufacturer. Please add manufacturers first.", "ru": "Производители не найдены. Невозможно создать товар без производителя. Пожалуйста, сначала добавьте производителей.", "pl": "Nie znaleziono producentów. Nie można utworzyć produktu bez producenta. Najpierw dodaj producentów."},
     "admin_no_categories_found_for_product_creation": {"en": "No categories found. You can proceed without selecting a category.", "ru": "Категории не найдены. Вы можете продолжить без выбора категории.", "pl": "Nie znaleziono kategorii. Możesz kontynuować bez wybierania kategorii."},
@@ -379,6 +379,15 @@ TEXTS: Dict[str, Dict[Optional[str], str]] = { # Allow Optional[str] for languag
     "admin_location_deleted_successfully": {"en": "Location '{name}' has been deleted successfully.", "ru": "Локация '{name}' успешно удалена.", "pl": "Lokalizacja '{name}' została pomyślnie usunięta."},
     "admin_location_delete_has_dependencies_error": {"en": "Error: Cannot delete location '{name}' as it has associated records (e.g., stock, orders). Please remove dependencies first.", "ru": "Ошибка: Невозможно удалить локацию '{name}', так как она связана с записями (например, остатки, заказы). Сначала удалите зависимости.", "pl": "Błąd: Nie można usunąć lokalizacji '{name}', ponieważ ma powiązane rekordy (np. stany magazynowe, zamówienia). Najpierw usuń zależności."},
     "admin_location_delete_failed_error": {"en": "Error: Failed to delete location '{name}'.", "ru": "Ошибка: Не удалось удалить локацию '{name}'.", "pl": "Błąd: Nie udało się usunąć lokalizacji '{name}'."},
+
+    # Category Creation Specific
+    "admin_cat_enter_name_prompt": {"en": "Please enter the name for the new category:", "ru": "Пожалуйста, введите название для новой категории:", "pl": "Proszę podać nazwę nowej kategorii:"},
+    "admin_cat_name_empty_error": {"en": "Category name cannot be empty. Please try again.", "ru": "Название категории не может быть пустым. Попробуйте еще раз.", "pl": "Nazwa kategorii nie może być pusta. Spróbuj ponownie."},
+    "admin_category_created_successfully": {"en": "✅ Category '{name}' (ID: {id}) created successfully!", "ru": "✅ Категория '{name}' (ID: {id}) успешно создана!", "pl": "✅ Kategoria '{name}' (ID: {id}) została pomyślnie utworzona!"},
+    "admin_category_already_exists_error": {"en": "❌ Category '{name}' already exists.", "ru": "❌ Категория '{name}' уже существует.", "pl": "❌ Kategoria '{name}' już istnieje."},
+    "admin_category_create_failed_db_error": {"en": "❌ Failed to create category due to a database error.", "ru": "❌ Не удалось создать категорию из-за ошибки базы данных.", "pl": "❌ Nie udało się utworzyć kategorii z powodu błędu bazy danych."},
+    "admin_category_create_failed_unexpected": {"en": "❌ Failed to create category due to an unexpected error.", "ru": "❌ Не удалось создать категорию из-за непредвиденной ошибки.", "pl": "❌ Nie udało się utworzyć kategorii z powodu nieoczekiwanego błędu."},
+    "admin_prod_use_keyboard_for_category": {"en": "Please select a category using the buttons below. Text input is not supported for category selection during product creation.", "ru": "Пожалуйста, выберите категорию с помощью кнопок ниже. Ввод текста для выбора категории при создании товара не поддерживается.", "pl": "Proszę wybrać kategorię za pomocą poniższych przycisków. Wprowadzanie tekstu w celu wyboru kategorii podczas tworzenia produktu nie jest obsługiwane."},
 }
 
 def get_text(key: str, language: Optional[str], default: Optional[str] = None, **kwargs: Any) -> str: # Ensure kwargs is here
