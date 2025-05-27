@@ -8,7 +8,7 @@ Basic settings view and statistics display.
 """
 
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from decimal import Decimal, InvalidOperation as DecimalInvalidOperation
 from datetime import datetime 
 
@@ -242,7 +242,7 @@ async def _send_paginated_entities_for_selection(
         await target_message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
     else:
         # Remove reply keyboard if any previous message handler left one
-        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML")
         
     if isinstance(event, types.CallbackQuery): await event.answer()
 
@@ -1308,24 +1308,26 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
                 target_message_text = get_text("admin_manufacturer_management_title", lang) # Assuming this key exists
                 target_reply_markup = create_admin_manufacturer_management_menu_keyboard(lang)
             else: # Default for other product states (e.g. product, category)
-                 target_message_text = get_text("admin_product_management_title", lang)
-                 target_reply_markup = create_admin_product_management_menu_keyboard(lang)
-            # Add specific handling for product creation states if universal cancel is used
-            elif current_fsm_state_obj in [
-                AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID,
-                AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID,
-                AdminProductStates.PRODUCT_AWAIT_COST,
-                AdminProductStates.PRODUCT_AWAIT_SKU,
-                AdminProductStates.PRODUCT_AWAIT_VARIATION,
-                AdminProductStates.PRODUCT_AWAIT_IMAGE_URL,
-                AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE,
-                AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME,
-                AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION,
-                AdminProductStates.PRODUCT_CONFIRM_ADD
-            ]:
-                # If cancelling during product creation, go to product management menu
-                target_message_text = get_text("admin_product_management_title", lang)
-                target_reply_markup = create_admin_product_management_menu_keyboard(lang)
+                 # The new if block goes here
+                 if current_fsm_state_obj in [
+                     AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID,
+                     AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID,
+                     AdminProductStates.PRODUCT_AWAIT_COST,
+                     AdminProductStates.PRODUCT_AWAIT_SKU,
+                     AdminProductStates.PRODUCT_AWAIT_VARIATION,
+                     AdminProductStates.PRODUCT_AWAIT_IMAGE_URL,
+                     AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_LANG_CODE,
+                     AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_NAME,
+                     AdminProductStates.PRODUCT_AWAIT_LOCALIZATION_DESCRIPTION,
+                     AdminProductStates.PRODUCT_CONFIRM_ADD
+                 ]:
+                     # If cancelling during product creation, go to product management menu
+                     target_message_text = get_text("admin_product_management_title", lang)
+                     target_reply_markup = create_admin_product_management_menu_keyboard(lang)
+                 else:
+                     # This is the original content of the else, now the else to the new if
+                     target_message_text = get_text("admin_product_management_title", lang)
+                     target_reply_markup = create_admin_product_management_menu_keyboard(lang)
 
         elif current_fsm_state_obj.startswith("AdminSettingsStates:"):
              target_message_text = get_text("admin_settings_title", lang)
