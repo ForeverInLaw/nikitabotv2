@@ -274,12 +274,12 @@ class ProductRepository:
         """
         try:
             # Case-insensitive check for existing manufacturer
-            stmt = select(Manufacturer).where(func.lower(Manufacturer.name) == func.lower(name))
-            result = await self.session.execute(stmt)
-            existing_manufacturer = result.scalar_one_or_none()
+            # Explicitly select only id and name to avoid UndefinedColumnError if created_at/updated_at don't exist
+            stmt = select(Manufacturer.id, Manufacturer.name).where(func.lower(Manufacturer.name) == func.lower(name))
+            existing_manufacturer_row = (await self.session.execute(stmt)).one_or_none()
 
-            if existing_manufacturer:
-                logger.warning(f"Manufacturer with name '{name}' already exists (ID: {existing_manufacturer.id}). Creation aborted.")
+            if existing_manufacturer_row:
+                logger.warning(f"Manufacturer with name '{name}' already exists (ID: {existing_manufacturer_row.id}). Creation aborted.")
                 return None
 
             new_manufacturer = Manufacturer(name=name)
@@ -314,6 +314,31 @@ class ProductRepository:
         )
         return result.scalars().all()
 
+    async def get_all_manufacturers_paginated(self, page: int, items_per_page: int) -> tuple[List[Manufacturer], int]:
+        """
+        Fetches a paginated list of manufacturers and the total count.
+        """
+        try:
+            # Query for the current page of manufacturers
+            stmt_page = (
+                select(Manufacturer)
+                .order_by(Manufacturer.id) # Order by ID for consistent pagination
+                .offset(page * items_per_page)
+                .limit(items_per_page)
+            )
+            result_page = await self.session.execute(stmt_page)
+            manufacturers_on_page = result_page.scalars().all()
+
+            # Query for the total count of manufacturers
+            stmt_count = select(func.count(Manufacturer.id))
+            result_count = await self.session.execute(stmt_count)
+            total_count = result_count.scalar_one()
+            
+            return manufacturers_on_page, total_count
+        except SQLAlchemyError as e:
+            logger.error(f"Database error while fetching paginated manufacturers: {e}", exc_info=True)
+            return [], 0
+
     async def update_manufacturer(self, manufacturer_id: int, name: str) -> Optional[Manufacturer]:
         """Update manufacturer name."""
         manufacturer = await self.get_manufacturer_by_id(manufacturer_id)
@@ -344,6 +369,31 @@ class ProductRepository:
         self.session.add(location)
         await self.session.flush()
         return location
+
+    async def get_all_locations_paginated(self, page: int, items_per_page: int) -> tuple[List[Location], int]:
+        """
+        Fetches a paginated list of locations and the total count.
+        """
+        try:
+            # Query for the current page of locations
+            stmt_page = (
+                select(Location)
+                .order_by(Location.id) # Order by ID for consistent pagination
+                .offset(page * items_per_page)
+                .limit(items_per_page)
+            )
+            result_page = await self.session.execute(stmt_page)
+            locations_on_page = result_page.scalars().all()
+
+            # Query for the total count of locations
+            stmt_count = select(func.count(Location.id))
+            result_count = await self.session.execute(stmt_count)
+            total_count = result_count.scalar_one()
+            
+            return locations_on_page, total_count
+        except SQLAlchemyError as e:
+            logger.error(f"Database error while fetching paginated locations: {e}", exc_info=True)
+            return [], 0
 
     async def get_location_by_id(self, location_id: int) -> Optional[Location]:
         """Get location by ID."""

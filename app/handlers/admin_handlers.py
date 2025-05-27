@@ -1467,21 +1467,10 @@ async def fsm_admin_manufacturer_name_received(message: types.Message, state: FS
     if message.text.lower() == "/cancel":
         await message.answer(get_text("admin_action_cancelled", lang), reply_markup=types.ReplyKeyboardRemove())
         await state.clear()
-        # To navigate back to the manufacturer menu, we can simulate a callback query
-        # or directly call the menu handler if it's structured to be callable this way.
-        # For simplicity and re-use, we'll mock a callback.
-        # A temporary message is needed for the mock callback's message attribute.
-        temp_msg_for_menu = await message.answer(get_text("loading_text", lang, default=".")) 
-        mock_callback = types.CallbackQuery(
-            id=str(message.message_id) + "_cancel_mfg_add",
-            from_user=message.from_user,
-            chat_instance=str(message.chat.id),
-            message=temp_msg_for_menu, # Use the temporary message
-            data="admin_manufacturers_menu" 
-        )
-        await cq_admin_manufacturers_main_menu(mock_callback, state, user_data)
-        if hasattr(temp_msg_for_menu, 'delete'): # Clean up the temporary message
-            await temp_msg_for_menu.delete()
+        # Directly send manufacturer menu
+        keyboard = create_admin_manufacturer_management_menu_keyboard(lang)
+        title_text = get_text("admin_manufacturer_management_title", lang, default="Manufacturer Management")
+        await message.answer(title_text, reply_markup=keyboard, parse_mode="HTML")
         return
 
     sanitized_name = sanitize_input(message.text)
@@ -1508,19 +1497,10 @@ async def fsm_admin_manufacturer_name_received(message: types.Message, state: FS
 
     await state.clear()
     
-    # Send manufacturer management menu again
-    # Similar to cancel, mock a callback to cq_admin_manufacturers_main_menu
-    temp_msg_for_menu_after_create = await message.answer(get_text("loading_text", lang, default="."), reply_markup=types.ReplyKeyboardRemove())
-    mock_callback_after_create = types.CallbackQuery(
-        id=str(message.message_id) + "_after_mfg_add",
-        from_user=message.from_user,
-        chat_instance=str(message.chat.id),
-        message=temp_msg_for_menu_after_create,
-        data="admin_manufacturers_menu"
-    )
-    await cq_admin_manufacturers_main_menu(mock_callback_after_create, state, user_data)
-    if hasattr(temp_msg_for_menu_after_create, 'delete'): # Clean up temporary message
-        await temp_msg_for_menu_after_create.delete()
+    # Directly send manufacturer menu
+    keyboard = create_admin_manufacturer_management_menu_keyboard(lang)
+    title_text = get_text("admin_manufacturer_management_title", lang, default="Manufacturer Management")
+    await message.answer(title_text, reply_markup=keyboard, parse_mode="HTML")
 
 
 async def _send_paginated_manufacturers_for_delete(
