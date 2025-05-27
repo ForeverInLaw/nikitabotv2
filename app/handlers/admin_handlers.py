@@ -67,7 +67,7 @@ class AdminProductStates(StatesGroup):
     # (Existing states from previous_code - assumed unchanged for this task scope)
     PRODUCT_AWAIT_MANUFACTURER_ID = State()
     PRODUCT_AWAIT_CATEGORY_ID = State()
-    PRODUCT_AWAIT_COST = State()
+    PRODUCT_AWAIT_PRICE = State() # Renamed from PRODUCT_AWAIT_COST
     PRODUCT_AWAIT_VARIATION = State()
     PRODUCT_AWAIT_IMAGE_URL = State()
     PRODUCT_AWAIT_LOCALIZATION_LANG_CODE = State()
@@ -78,7 +78,7 @@ class AdminProductStates(StatesGroup):
     PRODUCT_SELECT_ENTITY_FOR_FIELD = State() # State for selecting Manufacturer/Category during edit
 
     # Specific states for awaiting new values for each field during edit
-    PRODUCT_AWAIT_NEW_COST = State()
+    PRODUCT_AWAIT_NEW_PRICE = State() # Renamed from PRODUCT_AWAIT_NEW_COST
     PRODUCT_AWAIT_NEW_VARIATION = State()
     PRODUCT_AWAIT_NEW_IMAGE_URL = State()
 
@@ -1385,7 +1385,7 @@ async def universal_cancel_admin_action(event: Union[types.Message, types.Callba
                  if current_fsm_state_obj in [
                      AdminProductStates.PRODUCT_AWAIT_MANUFACTURER_ID,
                      AdminProductStates.PRODUCT_AWAIT_CATEGORY_ID,
-                     AdminProductStates.PRODUCT_AWAIT_COST,
+                     AdminProductStates.PRODUCT_AWAIT_PRICE, # Changed from PRODUCT_AWAIT_COST
                      AdminProductStates.PRODUCT_AWAIT_SKU,
                      AdminProductStates.PRODUCT_AWAIT_VARIATION,
                      AdminProductStates.PRODUCT_AWAIT_IMAGE_URL,
@@ -2226,8 +2226,8 @@ async def cq_admin_prod_create_select_category(callback: types.CallbackQuery, st
     current_product_data["category_name"] = category_name # Store name for summary
     await state.update_data(product_data=current_product_data)
 
-    await state.set_state(AdminProductStates.PRODUCT_AWAIT_COST)
-    prompt_text = get_text("admin_prod_enter_cost", lang)
+    await state.set_state(AdminProductStates.PRODUCT_AWAIT_PRICE) # Changed from PRODUCT_AWAIT_COST
+    prompt_text = get_text("admin_prod_enter_price", lang) # Changed text key
     cancel_info = get_text("cancel_prompt", lang)
     # Remove inline keyboard from previous message by sending a new one
     try: # Try to edit the existing message first to avoid clutter
@@ -2238,8 +2238,8 @@ async def cq_admin_prod_create_select_category(callback: types.CallbackQuery, st
 
 # --- Message handlers for product data input ---
 
-@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_COST), F.text)
-async def fsm_admin_prod_cost_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext):
+@router.message(StateFilter(AdminProductStates.PRODUCT_AWAIT_PRICE), F.text) # Changed StateFilter
+async def fsm_admin_prod_price_received(message: types.Message, user_data: Dict[str, Any], state: FSMContext): # Renamed function
     lang = user_data.get("language", "en")
     user_service = UserService()
     if not await is_admin_user_check(message.from_user.id, user_service):
@@ -2251,19 +2251,19 @@ async def fsm_admin_prod_cost_received(message: types.Message, user_data: Dict[s
         return await cq_admin_prod_add_cancel_to_menu(mock_callback, state, user_data)
 
     try:
-        cost = Decimal(sanitize_input(message.text))
+        cost = Decimal(sanitize_input(message.text)) # Variable name 'cost' kept for simplicity, but it holds price
         if cost <= 0:
-            raise ValueError("Cost must be positive.")
+            raise ValueError("Price must be positive.") # Updated error message for clarity
     except (DecimalInvalidOperation, ValueError):
-        await message.answer(get_text("admin_prod_invalid_cost_format", lang))
-        # Re-prompt for cost
-        prompt_text = get_text("admin_prod_enter_cost", lang)
+        await message.answer(get_text("admin_prod_invalid_price_format", lang)) # Changed text key
+        # Re-prompt for price
+        prompt_text = get_text("admin_prod_enter_price", lang) # Changed text key
         cancel_info = get_text("cancel_prompt", lang)
         await message.answer(f"{prompt_text}\n\n{hitalic(cancel_info)}", parse_mode="HTML")
         return
 
     current_product_data = (await state.get_data()).get("product_data", {})
-    current_product_data["cost"] = str(cost)
+    current_product_data["price"] = str(cost) # Changed key to "price"
     await state.update_data(product_data=current_product_data)
 
     await state.set_state(AdminProductStates.PRODUCT_AWAIT_VARIATION)
@@ -3189,7 +3189,7 @@ def _format_product_confirmation_details(product_data: Dict[str, Any], localizat
     
     details_text += f"{hbold(get_text('product_field_name_manufacturer_id', lang))}: {product_data.get('manufacturer_name', product_data.get('manufacturer_id', get_text('not_set', lang)))}\n"
     details_text += f"{hbold(get_text('product_field_name_category_id', lang))}: {product_data.get('category_name', product_data.get('category_id', get_text('not_set', lang)))}\n"
-    details_text += f"{hbold(get_text('product_field_name_cost', lang))}: {format_price(product_data.get('cost', 0), lang)}\n" # Assuming format_price can handle Decimal
+    details_text += f"{hbold(get_text('product_field_name_price', lang))}: {format_price(product_data.get('price', 0), lang)}\n" # Changed key and text key
     details_text += f"{hbold(get_text('product_field_name_variation', lang))}: {hcode(product_data.get('variation')) if product_data.get('variation') else get_text('not_set', lang)}\n"
     details_text += f"{hbold(get_text('product_field_name_image_url', lang))}: {hlink('Link', product_data['image_url']) if product_data.get('image_url') else get_text('not_set', lang)}\n"
     
@@ -3217,7 +3217,7 @@ async def cq_admin_prod_create_confirm_details(callback: types.CallbackQuery, st
     product_main_data = state_data.get("product_data", {})
     product_localizations = state_data.get("product_localizations_temp", [])
 
-    if not product_main_data.get("manufacturer_id") or not product_main_data.get("cost") or not product_localizations:
+    if not product_main_data.get("manufacturer_id") or "price" not in product_main_data or not product_localizations: # Changed "cost" to "price"
         await callback.answer(get_text("admin_prod_error_incomplete_data_for_confirmation", lang), show_alert=True)
         # Send back to product menu as something went wrong
         mock_cb_for_cancel = types.CallbackQuery(id=callback.id + "_incomplete", from_user=callback.from_user, chat_instance=callback.message.chat.id, message=callback.message, data="admin_prod_add_cancel_to_menu")
@@ -3260,7 +3260,7 @@ async def cq_admin_prod_create_execute_add(callback: types.CallbackQuery, state:
     product_localizations = state_data.get("product_localizations_temp", [])
 
     # Re-check necessary data just in case
-    if not product_main_data.get("manufacturer_id") or "cost" not in product_main_data or not product_localizations:
+    if not product_main_data.get("manufacturer_id") or "price" not in product_main_data or not product_localizations: # Changed "cost" to "price"
         await callback.answer(get_text("admin_prod_error_incomplete_data_for_creation", lang), show_alert=True)
         await state.clear() # Clear state as it's inconsistent
         # Send back to product menu
