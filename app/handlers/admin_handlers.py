@@ -242,7 +242,7 @@ async def _send_paginated_entities_for_selection(
         await target_message.edit_text(title, reply_markup=keyboard, parse_mode="HTML")
     else:
         # Remove reply keyboard if any previous message handler left one
-        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+        await target_message.answer(title, reply_markup=keyboard, parse_mode="HTML")
         
     if isinstance(event, types.CallbackQuery): await event.answer()
 
