@@ -6,6 +6,7 @@ Handles product CRUD, localization, stock management, and location/manufacturer 
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
+import asyncio
 
 from sqlalchemy import select, func # Added import
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError # Added import
@@ -275,6 +276,11 @@ class ProductService:
                     entity = await product_repo.get_location_by_id(entity_id)
                 elif entity_type == "manufacturer":
                     entity = await product_repo.get_manufacturer_by_id(entity_id)
+                elif entity_type == "category":
+                    entity = await product_repo.get_category_by_id(entity_id)
+                    if not entity:
+                        await asyncio.sleep(0.1)
+                        entity = await product_repo.get_category_by_id(entity_id)
                 
                 if entity:
                     return {"id": entity.id, "name": entity.name}
