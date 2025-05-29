@@ -245,12 +245,20 @@ class ProductService:
                 product_repo = ProductRepository(session)
                 if entity_type == "location":
                     entities, total_count = await product_repo.get_all_locations_paginated(page, items_per_page)
+                    return [{"id": entity.id, "name": entity.name} for entity in entities], total_count
                 elif entity_type == "manufacturer":
                     entities, total_count = await product_repo.get_all_manufacturers_paginated(page, items_per_page)
+                    return [{"id": entity.id, "name": entity.name} for entity in entities], total_count
+                elif entity_type == "category":
+                    all_categories = await product_repo.list_categories()
+                    total_count = len(all_categories)
+                    
+                    offset = page * items_per_page
+                    categories_on_page = all_categories[offset:offset + items_per_page]
+                    
+                    return [{"id": category.id, "name": category.name} for category in categories_on_page], total_count
                 else:
                     return [], 0
-                
-                return [{"id": entity.id, "name": entity.name} for entity in entities], total_count
         except Exception as e:
             logger.error(f"Error getting paginated {entity_type}: {e}", exc_info=True)
             return [], 0
