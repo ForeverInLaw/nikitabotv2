@@ -247,7 +247,7 @@ class ProductRepository:
         result = await self.session.execute(
             select(Category).where(Category.id == category_id)
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def get_category_by_name(self, name: str) -> Optional[Category]:
         """Get category by name."""
