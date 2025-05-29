@@ -2674,7 +2674,7 @@ async def fsm_admin_category_name_received(message: types.Message, state: FSMCon
 
 @router.callback_query(F.data.startswith("admin_prod_edit_locs_menu:"), StateFilter("*")) # Accessible from product edit options
 async def cq_admin_prod_edit_locs_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
-    lang = user_data.get("language", "en")
+        lang = user_data.get("language", "en")
         # Update if lang_code already in temp list (e.g. user went back and re-added for same lang)
         found_idx = -1
         for i, loc in enumerate(product_localizations_temp):
@@ -2769,7 +2769,7 @@ async def fsm_admin_category_name_received(message: types.Message, state: FSMCon
 
 @router.callback_query(F.data.startswith("admin_prod_edit_locs_menu:"), StateFilter("*")) # Accessible from product edit options
 async def cq_admin_prod_edit_locs_menu(callback: types.CallbackQuery, state: FSMContext, user_data: Dict[str, Any]):
-    lang = user_data.get("language", "en")
+        lang = user_data.get("language", "en")
         # Update if lang_code already in temp list (e.g. user went back and re-added for same lang)
         found_idx = -1
         for i, loc in enumerate(product_localizations_temp):
